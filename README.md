@@ -1,135 +1,214 @@
-# Event Insight Bot
+# HackGPT - Production-Ready SaaS Application
 
-Your AI-powered event information assistant. Submit any hackathon or event URL and get instant answers about prizes, rules, deadlines, and more.
+A modern, production-ready SaaS web application built with Next.js 15.2.2, React 19, and TypeScript 5. HackGPT is designed to supercharge hackathon experiences with AI-powered insights and tools.
 
-## Project info
+## 🚀 Features
 
-**URL**: https://lovable.dev/projects/327e44d1-48a5-4979-a509-6a9251fbc45a
+- **Modern Tech Stack**: Next.js 15.2.2, React 19, TypeScript 5, TailwindCSS 4
+- **Responsive Design**: Mobile-first approach with seamless cross-device experience
+- **Authentication System**: Secure user authentication with Supabase
+- **Dynamic Header**: Shrinking header with blur effect on scroll
+- **Animated Components**: Smooth animations with Framer Motion 12.5
+- **Theme Support**: Light/dark mode with next-themes 0.4.6
+- **Accessibility**: WCAG 2.1 compliant with proper ARIA labels
+- **SEO Optimized**: Comprehensive meta tags and structured data
+- **Performance Optimized**: Image optimization and proper caching strategies
 
-## Setup Instructions
+## 🛠️ Tech Stack
 
-### Environment Variables
+- **Framework**: Next.js 15.2.2
+- **Frontend**: React 19, TypeScript 5
+- **Styling**: TailwindCSS 4, Radix UI, shadcn/ui
+- **Animations**: Framer Motion 12.5
+- **Theming**: next-themes 0.4.6
+- **Backend**: Supabase (Database, Auth, Storage)
+- **Deployment**: Vercel (recommended)
 
-1. Copy the example environment file:
+## 📦 Installation
+
+1. **Clone the repository**
    ```bash
-   cp .env.example .env
+   git clone <repository-url>
+   cd hackgpt
    ```
 
-2. Fill in your Supabase credentials in the `.env` file:
-   ```
-   VITE_SUPABASE_URL=your_supabase_project_url
-   VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
-   ```
-
-   You can find these values in your Supabase project dashboard:
-   - Go to [Supabase Dashboard](https://supabase.com/dashboard)
-   - Select your project
-   - Go to Settings > API
-   - Copy the Project URL and anon/public key
-
-### Development Setup
-
-1. Install dependencies:
+2. **Install dependencies**
    ```bash
    npm install
    ```
 
-2. Start the development server:
+3. **Set up environment variables**
+   ```bash
+   cp .env.example .env.local
+   ```
+   
+   Fill in your environment variables:
+   ```env
+   NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+   NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+   ```
+
+4. **Run the development server**
    ```bash
    npm run dev
    ```
 
-### Deployment
+5. **Open your browser**
+   Navigate to [http://localhost:3000](http://localhost:3000)
 
-When deploying to production, make sure to set the environment variables in your hosting platform:
-- `VITE_SUPABASE_URL`
-- `VITE_SUPABASE_ANON_KEY`
+## 🏗️ Project Structure
 
-## Security Notes
-
-- Never commit your `.env` file to version control
-- The anon key is safe to use in client-side code as it only provides limited access
-- Row Level Security (RLS) is enabled on all tables to ensure data privacy
-- All sensitive operations are handled server-side through Supabase Edge Functions
-
-## How can I edit this code?
-
-There are several ways of editing your application.
-
-**Use Lovable**
-
-Simply visit the [Lovable Project](https://lovable.dev/projects/327e44d1-48a5-4979-a509-6a9251fbc45a) and start prompting.
-
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Set up environment variables (see Setup Instructions above)
-cp .env.example .env
-# Edit .env with your Supabase credentials
-
-# Step 5: Start the development server with auto-reloading and an instant preview.
-npm run dev
+```
+src/
+├── app/                    # Next.js 13+ app directory
+│   ├── auth/              # Authentication pages
+│   ├── dashboard/         # Dashboard pages
+│   ├── globals.css        # Global styles
+│   ├── layout.tsx         # Root layout
+│   └── page.tsx           # Home page
+├── components/            # Reusable components
+│   ├── auth/              # Authentication components
+│   ├── dashboard/         # Dashboard components
+│   ├── layout/            # Layout components
+│   ├── providers/         # Context providers
+│   ├── sections/          # Page sections
+│   └── ui/                # UI components (shadcn/ui)
+├── hooks/                 # Custom React hooks
+├── lib/                   # Utility functions
+└── types/                 # TypeScript type definitions
 ```
 
-**Edit a file directly in GitHub**
+## 🎨 Design System
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+### Colors
+- **Primary**: Blue (#3b82f6)
+- **Secondary**: Slate (#64748b)
+- **Accent**: Emerald (#10b981)
+- **Background**: Dynamic (light/dark mode)
 
-**Use GitHub Codespaces**
+### Typography
+- **Font**: Inter (Google Fonts)
+- **Headings**: 120% line height
+- **Body**: 150% line height
+- **Weights**: 400, 500, 600, 700
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+### Spacing
+- **System**: 8px base unit
+- **Breakpoints**: 
+  - Mobile: 320px+
+  - Tablet: 768px+
+  - Desktop: 1024px+
 
-## What technologies are used for this project?
+## 🔐 Authentication
 
-This project is built with:
+The application uses Supabase for authentication with the following features:
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
-- Supabase (Database, Authentication, Edge Functions)
-- OpenAI API (for embeddings and chat)
+- **Sign Up**: Email/password registration
+- **Sign In**: Email/password login
+- **Session Management**: Automatic token refresh
+- **Protected Routes**: Dashboard requires authentication
+- **User Profiles**: Extended user information storage
 
-## Features
+## 📱 Responsive Design
 
-- **Event URL Crawling**: Submit any event URL and the system will crawl and process the content
-- **AI-Powered Chat**: Ask questions about events and get intelligent responses
-- **Vector Search**: Content is embedded and searchable using semantic similarity
-- **User Authentication**: Secure user accounts with Supabase Auth
-- **Real-time Updates**: Live status updates during crawling process
+- **Mobile-first**: Designed for mobile devices first
+- **Breakpoints**: Responsive across all screen sizes
+- **Touch-friendly**: Optimized for touch interactions
+- **No horizontal scroll**: Ensures proper mobile experience
 
-## Can I deploy this project?
+## ♿ Accessibility
 
-Simply open [Lovable](https://lovable.dev/projects/327e44d1-48a5-4979-a509-6a9251fbc45a) and click on Share -> Publish.
+- **WCAG 2.1 AA**: Compliant with accessibility standards
+- **Keyboard Navigation**: Full keyboard support
+- **Screen Readers**: Proper ARIA labels and semantic HTML
+- **Color Contrast**: Meets contrast ratio requirements
+- **Reduced Motion**: Respects user motion preferences
 
-## Can I connect a custom domain to my Lovable project?
+## 🚀 Performance
 
-Yes, you can!
+- **Image Optimization**: Next.js automatic image optimization
+- **Code Splitting**: Automatic code splitting and lazy loading
+- **Bundle Analysis**: Optimized bundle size
+- **Caching**: Proper caching strategies
+- **Core Web Vitals**: Optimized for Google's Core Web Vitals
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+## 🧪 Testing
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+```bash
+# Run unit tests
+npm run test
+
+# Run tests in watch mode
+npm run test:watch
+
+# Run E2E tests
+npm run test:e2e
+```
+
+## 🚀 Deployment
+
+### Vercel (Recommended)
+
+1. **Connect your repository** to Vercel
+2. **Set environment variables** in Vercel dashboard
+3. **Deploy** automatically on push to main branch
+
+### Manual Deployment
+
+```bash
+# Build the application
+npm run build
+
+# Start production server
+npm start
+```
+
+## 📊 SEO & Analytics
+
+- **Meta Tags**: Comprehensive meta tag implementation
+- **Open Graph**: Social media sharing optimization
+- **Structured Data**: JSON-LD structured data
+- **Sitemap**: Automatic sitemap generation
+- **Analytics**: Google Analytics integration ready
+
+## 🔧 Development
+
+### Code Quality
+- **ESLint**: Code linting and formatting
+- **TypeScript**: Type safety and better DX
+- **Prettier**: Code formatting (recommended)
+- **Husky**: Git hooks for quality checks
+
+### Environment Variables
+```env
+# Required
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+
+# Optional
+NEXT_PUBLIC_GA_ID=your_google_analytics_id
+```
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## 📞 Support
+
+For support, email support@hackgpt.com or join our Discord community.
+
+## 🙏 Acknowledgments
+
+- [Next.js](https://nextjs.org/) - The React framework
+- [Tailwind CSS](https://tailwindcss.com/) - Utility-first CSS framework
+- [Radix UI](https://www.radix-ui.com/) - Low-level UI primitives
+- [Framer Motion](https://www.framer.com/motion/) - Animation library
+- [Supabase](https://supabase.com/) - Backend as a Service
