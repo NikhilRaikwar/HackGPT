@@ -40,14 +40,20 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     // Handle OAuth callback with access token in URL fragment
     const handleAuthCallback = async () => {
       const hash = window.location.hash;
+      console.log('Checking for auth callback, hash:', hash);
+      
       if (hash && hash.includes('access_token')) {
+        console.log('Found access token in URL, processing...');
         try {
           // Parse the access token from URL fragment
           const params = new URLSearchParams(hash.substring(1));
           const accessToken = params.get('access_token');
           const refreshToken = params.get('refresh_token');
           
+          console.log('Tokens found:', { accessToken: !!accessToken, refreshToken: !!refreshToken });
+          
           if (accessToken && refreshToken) {
+            console.log('Setting session with tokens...');
             // Set the session with the tokens
             const { data, error } = await supabase.auth.setSession({
               access_token: accessToken,
@@ -57,8 +63,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             if (error) {
               console.error('Error setting session:', error);
             } else {
+              console.log('Session set successfully, clearing URL...');
               // Clear the URL fragment
               window.history.replaceState({}, document.title, window.location.pathname);
+              console.log('URL cleared');
             }
           }
         } catch (error) {
@@ -73,14 +81,22 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     // Set up auth state listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
+        console.log('Auth state change:', event, { user: session?.user?.email });
         setSession(session);
         setUser(session?.user ?? null);
         setLoading(false);
+        
+        // If we have a session and there's a hash with tokens, clear it
+        if (session && window.location.hash.includes('access_token')) {
+          console.log('Clearing URL hash after successful auth...');
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
       }
     );
 
-    // Check for existing session
+    // Check for existing session and handle OAuth callback
     supabase.auth.getSession().then(({ data: { session } }) => {
+      console.log('Session check result:', { hasSession: !!session, user: session?.user?.email });
       setSession(session);
       setUser(session?.user ?? null);
       setLoading(false);
