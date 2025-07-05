@@ -8,6 +8,7 @@ import { AuthPage } from "@/components/AuthPage";
 import { Dashboard } from "@/components/Dashboard";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
+import { Analytics } from "@vercel/analytics/react";
 
 const queryClient = new QueryClient();
 
@@ -44,6 +45,7 @@ const App = () => (
         <Toaster />
         <Sonner />
         <AppContent />
+        <Analytics />
       </AuthProvider>
     </TooltipProvider>
   </QueryClientProvider>
