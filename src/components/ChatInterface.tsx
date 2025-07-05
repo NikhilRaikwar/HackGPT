@@ -7,7 +7,9 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import { ArrowLeft, Send } from 'lucide-react';
+import { ArrowLeft, Send, Bot } from 'lucide-react';
+import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar';
+import { AppSidebar } from '@/components/AppSidebar';
 
 interface Message {
   id: string;
@@ -19,9 +21,11 @@ interface Message {
 interface ChatInterfaceProps {
   eventId: string;
   onBack: () => void;
+  onEventSelect?: (eventId: string) => void;
+  isEmbedded?: boolean;
 }
 
-export const ChatInterface = ({ eventId, onBack }: ChatInterfaceProps) => {
+export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = false }: ChatInterfaceProps) => {
   const { user } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
@@ -187,12 +191,12 @@ export const ChatInterface = ({ eventId, onBack }: ChatInterfaceProps) => {
     }
   };
 
-  return (
-    <div className="min-h-screen bg-gradient-card flex flex-col">
+  const ChatContent = () => (
+    <>
       {/* Header */}
-      <header className="border-b border-border/50 bg-card/50 backdrop-blur-sm">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center h-16 gap-4">
+      {!isEmbedded && (
+        <header className="border-b border-border/50 bg-card/50 backdrop-blur-sm">
+          <div className="flex items-center h-16 gap-4 px-4">
             <Button variant="ghost" onClick={onBack} size="sm">
               <ArrowLeft className="h-4 w-4" />
               Back
@@ -202,11 +206,11 @@ export const ChatInterface = ({ eventId, onBack }: ChatInterfaceProps) => {
               <p className="text-sm text-muted-foreground">{eventName}</p>
             </div>
           </div>
-        </div>
-      </header>
+        </header>
+      )}
 
       {/* Chat Area */}
-      <div className="flex-1 max-w-4xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6">
+      <div className="flex flex-1 flex-col gap-4 p-4 pt-0">
         <Card className="h-full bg-card/50 backdrop-blur-sm border-border/50 flex flex-col">
           <CardHeader className="pb-4">
             <CardTitle className="text-center text-sm text-muted-foreground">
@@ -234,21 +238,32 @@ export const ChatInterface = ({ eventId, onBack }: ChatInterfaceProps) => {
                     >
                       {message.role === 'assistant' && (
                         <Avatar className="h-8 w-8 bg-primary/10">
-                          <AvatarFallback className="text-primary text-xs">AI</AvatarFallback>
+                          <AvatarFallback className="text-primary text-xs">
+                            <Bot className="h-4 w-4" />
+                          </AvatarFallback>
                         </Avatar>
                       )}
-                      <div
-                        className={`max-w-[80%] rounded-lg px-4 py-2 ${
-                          message.role === 'user'
-                            ? 'bg-primary text-primary-foreground ml-12'
-                            : 'bg-muted text-muted-foreground mr-12'
-                        }`}
-                      >
-                        <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-                        <p className="text-xs opacity-50 mt-1">
-                          {new Date(message.created_at).toLocaleTimeString()}
-                        </p>
-                      </div>
+                       <div
+                         className={`max-w-[80%] rounded-lg px-4 py-2 ${
+                           message.role === 'user'
+                             ? 'bg-primary text-primary-foreground ml-12'
+                             : 'bg-muted text-foreground mr-12'
+                         }`}
+                       >
+                         <div 
+                           className="text-sm whitespace-pre-wrap font-medium leading-relaxed"
+                           dangerouslySetInnerHTML={{
+                             __html: message.content
+                               .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                               .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                               .replace(/`(.*?)`/g, '<code class="bg-muted px-1 py-0.5 rounded text-xs">$1</code>')
+                               .replace(/\n/g, '<br/>')
+                           }}
+                         />
+                         <p className="text-xs opacity-50 mt-2">
+                           {new Date(message.created_at).toLocaleTimeString()}
+                         </p>
+                       </div>
                       {message.role === 'user' && (
                         <Avatar className="h-8 w-8 bg-muted">
                           <AvatarFallback className="text-xs">
@@ -271,7 +286,7 @@ export const ChatInterface = ({ eventId, onBack }: ChatInterfaceProps) => {
                   disabled={loading}
                   className="flex-1"
                 />
-                <Button type="submit" disabled={loading} variant="gradient" size="sm">
+                <Button type="submit" disabled={loading} size="sm">
                   <Send className="h-4 w-4" />
                 </Button>
               </form>
@@ -279,6 +294,19 @@ export const ChatInterface = ({ eventId, onBack }: ChatInterfaceProps) => {
           </CardContent>
         </Card>
       </div>
-    </div>
+    </>
+  );
+
+  if (isEmbedded) {
+    return <ChatContent />;
+  }
+
+  return (
+    <SidebarProvider>
+      <AppSidebar onEventSelect={onEventSelect || (() => {})} />
+      <SidebarInset>
+        <ChatContent />
+      </SidebarInset>
+    </SidebarProvider>
   );
 };

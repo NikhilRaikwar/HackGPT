@@ -1,14 +1,27 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
+import { SidebarProvider, SidebarTrigger, SidebarInset } from '@/components/ui/sidebar';
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
+import { AppSidebar } from '@/components/AppSidebar';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { ChatInterface } from './ChatInterface';
+import { MagicCard } from '@/components/magicui/magic-card';
+import { useTheme } from 'next-themes';
+import { Brain } from 'lucide-react';
 
 interface Event {
   id: string;
@@ -20,11 +33,20 @@ interface Event {
 }
 
 export const Dashboard = () => {
-  const { user, signOut } = useAuth();
+  const { user } = useAuth();
+  const { theme } = useTheme();
+  const navigate = useNavigate();
   const [events, setEvents] = useState<Event[]>([]);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const [selectedEventName, setSelectedEventName] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [eventName, setEventName] = useState("");
+  const [eventUrl, setEventUrl] = useState("");
+
+  const getUserDisplayName = () => {
+    return user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email || 'User';
+  };
 
   useEffect(() => {
     if (user) {
@@ -50,24 +72,39 @@ export const Dashboard = () => {
     }
   };
 
-  const handleSubmitUrl = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleEventSelect = (eventId: string) => {
+    if (!eventId) {
+      // Clear selected event and show the form
+      setSelectedEventId(null);
+      setSelectedEventName('');
+      return;
+    }
+    
+    const event = events.find(e => e.id === eventId);
+    setSelectedEventId(eventId);
+    setSelectedEventName(event?.name || '');
+  };
+
+  const handleDashboardClick = () => {
+    // Clear selected event and show the form
+    setSelectedEventId(null);
+    setSelectedEventName('');
+  };
+
+  const handleSubmitUrl = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
 
-    const formData = new FormData(e.currentTarget);
-    const url = formData.get('url') as string;
-    const name = formData.get('name') as string;
-
     try {
       // Basic URL validation
-      new URL(url);
+      new URL(eventUrl);
 
       const { data, error } = await supabase
         .from('events')
         .insert({
           user_id: user?.id,
-          name: name || 'Untitled Event',
-          original_url: url,
+          name: eventName || 'Untitled Event',
+          original_url: eventUrl,
           status: 'pending'
         })
         .select()
@@ -77,7 +114,7 @@ export const Dashboard = () => {
 
       // Start crawling process
       const { error: crawlError } = await supabase.functions.invoke('crawl-event', {
-        body: { eventId: data.id, url }
+        body: { eventId: data.id, url: eventUrl }
       });
 
       if (crawlError) {
@@ -86,7 +123,12 @@ export const Dashboard = () => {
       } else {
         toast.success('URL submitted! Crawling started...');
         loadEvents();
-        (e.target as HTMLFormElement).reset();
+        // Clear the form
+        setEventName("");
+        setEventUrl("");
+        // Automatically open the chat for the new event
+        setSelectedEventId(data.id);
+        setSelectedEventName(data.name);
       }
     } catch (error) {
       if (error instanceof TypeError) {
@@ -100,147 +142,171 @@ export const Dashboard = () => {
     }
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'completed': return 'bg-green-500/20 text-green-400 border-green-500/30';
-      case 'crawling': return 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30';
-      case 'failed': return 'bg-red-500/20 text-red-400 border-red-500/30';
-      default: return 'bg-blue-500/20 text-blue-400 border-blue-500/30';
-    }
-  };
-
-  if (selectedEventId) {
-    return (
-      <ChatInterface 
-        eventId={selectedEventId} 
-        onBack={() => setSelectedEventId(null)} 
-      />
-    );
-  }
-
   return (
-    <div className="min-h-screen bg-gradient-card">
-      {/* Header */}
-      <header className="border-b border-border/50 bg-card/50 backdrop-blur-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <h1 className="text-xl font-semibold bg-gradient-primary bg-clip-text text-transparent">
-              Event Insight Bot
-            </h1>
-            <div className="flex items-center gap-4">
-              <span className="text-sm text-muted-foreground">
-                Welcome, {user?.email}
-              </span>
-              <Button variant="outline" onClick={signOut}>
-                Sign Out
-              </Button>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* URL Submission */}
-          <div className="lg:col-span-1">
-            <Card className="bg-card/50 backdrop-blur-sm border-border/50">
-              <CardHeader>
-                <CardTitle>Submit Event URL</CardTitle>
-                <CardDescription>
-                  Add a hackathon or event URL to create a custom Q&A chatbot
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <form onSubmit={handleSubmitUrl} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="name">Event Name</Label>
-                    <Input
-                      id="name"
-                      name="name"
-                      placeholder="e.g., DevPost Hackathon 2024"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="url">Event URL</Label>
-                    <Input
-                      id="url"
-                      name="url"
-                      type="url"
-                      placeholder="https://example.com/hackathon"
-                      required
-                    />
-                  </div>
-                  <Button type="submit" className="w-full" variant="gradient" disabled={submitting}>
-                    {submitting ? 'Submitting...' : 'Submit URL'}
-                  </Button>
-                </form>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Events List */}
-          <div className="lg:col-span-2">
-            <Card className="bg-card/50 backdrop-blur-sm border-border/50">
-              <CardHeader>
-                <CardTitle>Your Events</CardTitle>
-                <CardDescription>
-                  Manage your submitted events and chat with their AI assistants
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {loading ? (
-                  <div className="text-center py-8">
-                    <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-                    <p className="mt-2 text-muted-foreground">Loading events...</p>
-                  </div>
-                ) : events.length === 0 ? (
-                  <div className="text-center py-8">
-                    <p className="text-muted-foreground">No events submitted yet.</p>
-                    <p className="text-sm text-muted-foreground mt-1">
-                      Submit your first event URL to get started!
-                    </p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {events.map((event) => (
-                      <div key={event.id} className="p-4 border border-border/50 rounded-lg bg-background/50">
-                        <div className="flex items-start justify-between mb-2">
-                          <h3 className="font-medium">{event.name}</h3>
-                          <Badge className={getStatusColor(event.status)}>
-                            {event.status}
-                          </Badge>
-                        </div>
-                        {event.description && (
-                          <p className="text-sm text-muted-foreground mb-2">
-                            {event.description}
-                          </p>
-                        )}
-                        <p className="text-xs text-muted-foreground mb-3">
-                          {event.original_url}
-                        </p>
-                        <Separator className="my-3" />
-                        <div className="flex justify-between items-center">
-                          <span className="text-xs text-muted-foreground">
-                            Added {new Date(event.created_at).toLocaleDateString()}
-                          </span>
-                          <Button
-                            size="sm"
-                            variant="gradient"
-                            onClick={() => setSelectedEventId(event.id)}
-                            disabled={event.status !== 'completed'}
-                          >
-                            {event.status === 'completed' ? 'Chat' : 'Processing...'}
-                          </Button>
-                        </div>
+    <SidebarProvider>
+      <AppSidebar onEventSelect={handleEventSelect} selectedEventId={selectedEventId} />
+      <SidebarInset>
+        <header className="flex h-16 shrink-0 items-center gap-2">
+          <div className="flex items-center gap-2 px-4">
+            <SidebarTrigger className="-ml-1" />
+            <Separator
+              orientation="vertical"
+              className="mr-2 data-[orientation=vertical]:h-4"
+            />
+            <Breadcrumb>
+              <BreadcrumbList>
+                <BreadcrumbItem className="hidden md:block">
+                  <BreadcrumbLink 
+                    href="#" 
+                    onClick={(e) => {
+                      e.preventDefault();
+                      handleDashboardClick();
+                    }}
+                    className="hover:text-primary transition-colors flex items-center gap-2"
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className="w-6 h-6 rounded-lg bg-primary flex items-center justify-center">
+                        <Brain className="w-3 h-3 text-primary-foreground" />
                       </div>
-                    ))}
-                  </div>
+                      <span className="font-medium">HackGPT Dashboard</span>
+                    </div>
+                  </BreadcrumbLink>
+                </BreadcrumbItem>
+                {selectedEventName && (
+                  <>
+                    <BreadcrumbSeparator className="hidden md:block" />
+                    <BreadcrumbItem>
+                      <BreadcrumbPage>{selectedEventName}</BreadcrumbPage>
+                    </BreadcrumbItem>
+                  </>
                 )}
-              </CardContent>
-            </Card>
+                {!selectedEventName && (
+                  <>
+                    <BreadcrumbSeparator className="hidden md:block" />
+                    <BreadcrumbItem>
+                      <BreadcrumbPage>Home</BreadcrumbPage>
+                    </BreadcrumbItem>
+                  </>
+                )}
+              </BreadcrumbList>
+            </Breadcrumb>
           </div>
+        </header>
+        
+        <div className="flex flex-1 flex-col gap-4 p-4 pt-0">
+          {selectedEventId ? (
+            <ChatInterface 
+              eventId={selectedEventId} 
+              onBack={() => {
+                setSelectedEventId(null);
+                setSelectedEventName('');
+              }}
+              onEventSelect={handleEventSelect}
+              isEmbedded={true}
+            />
+          ) : (
+            <>
+              {/* Welcome Message */}
+              <div className="text-center py-8">
+                <h1 className="text-3xl font-bold text-foreground mb-2">
+                  Welcome, {getUserDisplayName()}!
+                </h1>
+                <p className="text-muted-foreground">
+                  Chat with HackGPT about your hackathons and events
+                </p>
+              </div>
+
+              {/* Event URL Form */}
+              <div className="w-full max-w-lg mx-auto">
+                <MagicCard
+                  gradientColor={theme === "dark" ? "#1a1a1a" : "#f8fafc"}
+                  className="relative overflow-hidden"
+                >
+                  <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-primary/5" />
+                  <div className="relative z-10">
+                    <Card className="border-0 shadow-none bg-transparent">
+                      <CardHeader className="text-center pb-6">
+                        <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
+                          <svg className="w-6 h-6 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                          </svg>
+                        </div>
+                        <CardTitle className="text-2xl font-bold bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent">
+                          Add Event URL
+                        </CardTitle>
+                        <CardDescription className="text-base text-muted-foreground max-w-sm mx-auto">
+                          Transform any hackathon URL into an intelligent Q&A chatbot
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="px-6 pb-6">
+                        <form onSubmit={handleSubmitUrl} className="space-y-6">
+                          <div className="space-y-4">
+                            <div className="space-y-2">
+                              <Label htmlFor="event-name" className="text-sm font-medium text-foreground">
+                                Event Name
+                              </Label>
+                              <div className="relative group">
+                                <Input
+                                  id="event-name"
+                                  type="text"
+                                  placeholder="e.g., DevPost Hackathon 2024"
+                                  value={eventName}
+                                  onChange={(e) => setEventName(e.target.value)}
+                                  required
+                                  className="h-12 px-4 border-border/50 bg-background/50 backdrop-blur-sm transition-all duration-300 focus:border-primary/50 focus:ring-2 focus:ring-primary/20 group-hover:border-primary/30"
+                                />
+                                <div className="absolute inset-0 rounded-md bg-gradient-to-r from-primary/5 to-primary/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
+                              </div>
+                            </div>
+                            <div className="space-y-2">
+                              <Label htmlFor="event-url" className="text-sm font-medium text-foreground">
+                                Event URL
+                              </Label>
+                              <div className="relative group">
+                                <Input
+                                  id="event-url"
+                                  type="url"
+                                  placeholder="https://example.com/hackathon"
+                                  value={eventUrl}
+                                  onChange={(e) => setEventUrl(e.target.value)}
+                                  required
+                                  className="h-12 px-4 border-border/50 bg-background/50 backdrop-blur-sm transition-all duration-300 focus:border-primary/50 focus:ring-2 focus:ring-primary/20 group-hover:border-primary/30"
+                                />
+                                <div className="absolute inset-0 rounded-md bg-gradient-to-r from-primary/5 to-primary/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
+                              </div>
+                            </div>
+                          </div>
+                          <div className="pt-2">
+                            <Button 
+                              type="submit" 
+                              className="w-full h-12 bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70 text-primary-foreground font-medium transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98] shadow-lg hover:shadow-xl" 
+                              disabled={submitting}
+                            >
+                              {submitting ? (
+                                <div className="flex items-center gap-2">
+                                  <div className="w-4 h-4 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
+                                  <span>Processing...</span>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-2">
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                                  </svg>
+                                  <span>Create AI Assistant</span>
+                                </div>
+                              )}
+                            </Button>
+                          </div>
+                        </form>
+                      </CardContent>
+                    </Card>
+                  </div>
+                </MagicCard>
+              </div>
+            </>
+          )}
         </div>
-      </div>
-    </div>
+      </SidebarInset>
+    </SidebarProvider>
   );
 };
