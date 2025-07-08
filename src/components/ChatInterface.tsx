@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { ArrowLeft, Send, Bot } from 'lucide-react';
@@ -32,6 +32,8 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [eventName, setEventName] = useState<string>('');
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const [isAITyping, setIsAITyping] = useState(false);
+  const [aiTypingText, setAITypingText] = useState<string | null>(null);
 
   useEffect(() => {
     if (user && eventId) {
@@ -160,6 +162,10 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
         } : msg
       ));
 
+      // Show typing indicator
+      setIsAITyping(true);
+      setAITypingText(null);
+
       // Call chatbot function
       const { data: response, error: chatError } = await supabase.functions.invoke('chat-with-event', {
         body: {
@@ -171,25 +177,52 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
 
       if (chatError) throw chatError;
 
-      // Add assistant response
-      const assistantMessage: Message = {
+      // Typing animation for AI response
+      const aiMessage: Message = {
         id: response.messageId,
         role: 'assistant',
         content: response.content,
         created_at: response.created_at
       };
-      setMessages(prev => [...prev, assistantMessage]);
+
+      let currentText = '';
+      const fullText = aiMessage.content;
+      setAITypingText('');
+      let i = 0;
+      const typingSpeed = 18; // ms per character
+      function typeChar() {
+        if (i <= fullText.length) {
+          setAITypingText(fullText.slice(0, i));
+          i++;
+          setTimeout(typeChar, typingSpeed);
+        } else {
+          setIsAITyping(false);
+          setAITypingText(null);
+          setMessages(prev => [...prev, aiMessage]);
+        }
+      }
+      typeChar();
 
     } catch (error) {
       console.error('Error sending message:', error);
       toast.error('Failed to send message');
-      
+      setIsAITyping(false);
+      setAITypingText(null);
       // Remove the user message if there was an error
       setMessages(prev => prev.filter(msg => msg.id !== userMessage.id));
     } finally {
       setLoading(false);
     }
   };
+
+  // Typing indicator component
+  const TypingIndicator = () => (
+    <div className="typing-indicator">
+      <span className="typing-dot" />
+      <span className="typing-dot" />
+      <span className="typing-dot" />
+    </div>
+  );
 
   const ChatContent = () => (
     <>
@@ -222,57 +255,117 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
             {/* Messages */}
             <ScrollArea className="flex-1 px-6" ref={scrollAreaRef}>
               <div className="space-y-4 pb-4">
-                {messages.length === 0 ? (
+                {messages.length === 0 && !isAITyping && !aiTypingText ? (
                   <div className="text-center py-8">
                     <p className="text-muted-foreground">
                       Start a conversation by asking about the event details, prizes, rules, or anything else!
                     </p>
                   </div>
                 ) : (
-                  messages.map((message) => (
-                    <div
-                      key={message.id}
-                      className={`flex gap-3 ${
-                        message.role === 'user' ? 'justify-end' : 'justify-start'
-                      }`}
-                    >
-                      {message.role === 'assistant' && (
-                        <Avatar className="h-8 w-8 bg-primary/10">
+                  <>
+                    {messages.map((message) => (
+                      <div
+                        key={message.id}
+                        className={`flex w-full gap-2 sm:gap-3 mb-3 ${
+                          message.role === 'user' ? 'justify-end' : 'justify-start'
+                        }`}
+                      >
+                        {message.role === 'assistant' && (
+                          <Avatar className="h-8 w-8 bg-primary/10 mt-auto">
+                            <AvatarFallback className="text-primary text-xs">
+                              <Bot className="h-4 w-4" />
+                            </AvatarFallback>
+                          </Avatar>
+                        )}
+                        {message.role === 'user' ? (
+                          <div className="flex w-full gap-2 sm:gap-3 mb-3 justify-end">
+                            <div
+                              className="max-w-[75vw] sm:max-w-[45%] rounded-2xl px-4 py-3 text-[17px] leading-relaxed shadow-md transition-colors duration-200 font-medium whitespace-pre-wrap bg-primary text-primary-foreground ml-2 sm:ml-12 rounded-br-md"
+                              style={{ wordBreak: 'break-word', lineHeight: 1.7, padding: '14px 18px', fontSize: '17px', fontFamily: 'Times New Roman, Times, serif' }}
+                            >
+                              <div
+                                dangerouslySetInnerHTML={{
+                                  __html: message.content
+                                    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                                    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                                    .replace(/`(.*?)`/g, '<code class=\"bg-muted px-1 py-0.5 rounded text-xs\">$1</code>')
+                                    .replace(/\n/g, '<br/>')
+                                }}
+                              />
+                              <p className="text-xs opacity-50 mt-2 text-right select-none" style={{ fontSize: '12px', lineHeight: 1.2, fontFamily: 'Times New Roman, Times, serif' }}>
+                                {new Date(message.created_at).toLocaleTimeString()}
+                              </p>
+                            </div>
+                            <Avatar className="h-8 w-8 bg-muted mt-auto">
+                              {user?.user_metadata?.avatar_url ? (
+                                <AvatarImage src={user.user_metadata.avatar_url} alt={user?.email || 'User'} />
+                              ) : null}
+                              <AvatarFallback className="text-xs">
+                                {user?.user_metadata?.full_name
+                                  ? user.user_metadata.full_name.split(' ').map((n: string) => n[0]).join('')
+                                  : user?.user_metadata?.name
+                                    ? user.user_metadata.name.split(' ').map((n: string) => n[0]).join('')
+                                    : user?.email
+                                      ? user.email.charAt(0).toUpperCase()
+                                      : 'U'}
+                              </AvatarFallback>
+                            </Avatar>
+                          </div>
+                        ) : (
+                          <div
+                            className="ai-response text-[17px] font-normal whitespace-pre-wrap text-foreground"
+                            style={{ maxWidth: '95vw', marginLeft: 'auto', marginRight: 'auto', paddingLeft: 10, paddingRight: 10, wordBreak: 'break-word', lineHeight: 1.7, fontSize: '17px', fontFamily: 'Times New Roman, Times, serif' }}
+                          >
+                            <div
+                              dangerouslySetInnerHTML={{
+                                __html: message.content
+                                  // Bold headings: Markdown #, ##, or lines surrounded by ** ** at start
+                                  .replace(/^(#+\s*)(.*)$/gm, (m, hashes, title) => `<strong>${title}</strong>`) // Markdown headings
+                                  .replace(/^\*\*(.+?)\*\*$/gm, '<strong>$1</strong>') // Standalone bold lines
+                                  .replace(/\*\*(.*?)\*\*/g, '$1') // Remove other bold
+                                  // Bullet points: lines starting with - or *
+                                  .replace(/(^|\n)[\-\*]\s+(.*?)(?=\n|$)/g, '$1<ul><li>$2</li></ul>')
+                                  // Merge consecutive <ul> tags
+                                  .replace(/<\/ul>\s*<ul>/g, '')
+                                  .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                                  .replace(/`(.*?)`/g, '<code class=\"bg-muted px-1 py-0.5 rounded text-xs\">$1</code>')
+                                  .replace(/\n/g, '<br/>')
+                              }}
+                            />
+                            <p className="text-xs opacity-50 mt-2 text-left select-none" style={{ fontSize: '12px', lineHeight: 1.2, fontFamily: 'Times New Roman, Times, serif' }}>
+                              {new Date(message.created_at).toLocaleTimeString()}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    {/* AI Typing bubble */}
+                    {(isAITyping || aiTypingText) && (
+                      <div className="flex w-full gap-2 sm:gap-3 mb-3 justify-start">
+                        <Avatar className="h-8 w-8 bg-primary/10 mt-auto">
                           <AvatarFallback className="text-primary text-xs">
                             <Bot className="h-4 w-4" />
                           </AvatarFallback>
                         </Avatar>
-                      )}
-                       <div
-                         className={`max-w-[80%] rounded-lg px-4 py-2 ${
-                           message.role === 'user'
-                             ? 'bg-primary text-primary-foreground ml-12'
-                             : 'bg-muted text-foreground mr-12'
-                         }`}
-                       >
-                         <div 
-                           className="text-sm whitespace-pre-wrap font-medium leading-relaxed"
-                           dangerouslySetInnerHTML={{
-                             __html: message.content
-                               .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                               .replace(/\*(.*?)\*/g, '<em>$1</em>')
-                               .replace(/`(.*?)`/g, '<code class="bg-muted px-1 py-0.5 rounded text-xs">$1</code>')
-                               .replace(/\n/g, '<br/>')
-                           }}
-                         />
-                         <p className="text-xs opacity-50 mt-2">
-                           {new Date(message.created_at).toLocaleTimeString()}
-                         </p>
-                       </div>
-                      {message.role === 'user' && (
-                        <Avatar className="h-8 w-8 bg-muted">
-                          <AvatarFallback className="text-xs">
-                            {user?.email?.charAt(0).toUpperCase()}
-                          </AvatarFallback>
-                        </Avatar>
-                      )}
-                    </div>
-                  ))
+                        <div
+                          className="max-w-[85vw] sm:max-w-[70%] text-[17px] font-medium whitespace-pre-wrap text-foreground mr-2 sm:mr-12"
+                          style={{ wordBreak: 'break-word', lineHeight: 1.7, fontSize: '17px', padding: 0, background: 'none', boxShadow: 'none', minHeight: '40px', display: 'flex', alignItems: 'center' }}
+                        >
+                          {aiTypingText !== null ? (
+                            <span className="typing-text" dangerouslySetInnerHTML={{
+                              __html: aiTypingText
+                                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                                .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                                .replace(/`(.*?)`/g, '<code class=\"bg-muted px-1 py-0.5 rounded text-xs\">$1</code>')
+                                .replace(/\n/g, '<br/>')
+                            }} />
+                          ) : (
+                            <TypingIndicator />
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             </ScrollArea>
@@ -283,10 +376,11 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
                 <Input
                   name="message"
                   placeholder="Ask about event details, prizes, rules..."
-                  disabled={loading}
+                  disabled={loading || isAITyping}
                   className="flex-1"
+                  autoComplete="off"
                 />
-                <Button type="submit" disabled={loading} size="sm">
+                <Button type="submit" disabled={loading || isAITyping} size="sm">
                   <Send className="h-4 w-4" />
                 </Button>
               </form>

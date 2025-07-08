@@ -40,3 +40,47 @@
 .read-the-docs {
   color: #888;
 }
+
+/* Typing indicator (three animated dots) */
+.typing-indicator {
+  display: flex;
+  align-items: center;
+  height: 24px;
+  gap: 4px;
+  margin-left: 8px;
+}
+.typing-dot {
+  width: 7px;
+  height: 7px;
+  background: #bdbdbd;
+  border-radius: 50%;
+  display: inline-block;
+  animation: typing-bounce 1.2s infinite both;
+}
+.typing-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.typing-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+@keyframes typing-bounce {
+  0%, 80%, 100% {
+    transform: translateY(0);
+    opacity: 0.7;
+  }
+  40% {
+    transform: translateY(-7px);
+    opacity: 1;
+  }
+}
+
+/* Typing animation for chat text */
+.typing-text {
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  font-family: inherit;
+  font-size: 17px;
+  line-height: 1.7;
+  letter-spacing: 0.01em;
+  transition: color 0.2s;
+}
