@@ -32,14 +32,13 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [eventName, setEventName] = useState<string>('');
   const scrollAreaRef = useRef<HTMLDivElement>(null);
-  const [isAITyping, setIsAITyping] = useState(false);
-  const [aiTypingText, setAITypingText] = useState<string | null>(null);
 
   useEffect(() => {
     if (user && eventId) {
       initializeChat();
       loadEventDetails();
     }
+    // eslint-disable-next-line
   }, [user, eventId]);
 
   useEffect(() => {
@@ -153,20 +152,18 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
       if (userError) throw userError;
 
       // Update the temp message with real ID
-      setMessages(prev => prev.map(msg => 
-        msg.id === userMessage.id ? { 
-          id: savedUserMessage.id,
-          role: savedUserMessage.role as 'user' | 'assistant',
-          content: savedUserMessage.content,
-          created_at: savedUserMessage.created_at
-        } : msg
+      setMessages(prev => prev.map(msg =>
+        msg.id === userMessage.id ?
+          {
+            id: savedUserMessage.id,
+            role: savedUserMessage.role as 'user' | 'assistant',
+            content: savedUserMessage.content,
+            created_at: savedUserMessage.created_at
+          }
+          : msg
       ));
 
-      // Show typing indicator
-      setIsAITyping(true);
-      setAITypingText(null);
-
-      // Call chatbot function
+      // Call chatbot function and display response instantly
       const { data: response, error: chatError } = await supabase.functions.invoke('chat-with-event', {
         body: {
           sessionId,
@@ -177,7 +174,6 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
 
       if (chatError) throw chatError;
 
-      // Typing animation for AI response
       const aiMessage: Message = {
         id: response.messageId,
         role: 'assistant',
@@ -185,44 +181,17 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
         created_at: response.created_at
       };
 
-      let currentText = '';
-      const fullText = aiMessage.content;
-      setAITypingText('');
-      let i = 0;
-      const typingSpeed = 18; // ms per character
-      function typeChar() {
-        if (i <= fullText.length) {
-          setAITypingText(fullText.slice(0, i));
-          i++;
-          setTimeout(typeChar, typingSpeed);
-        } else {
-          setIsAITyping(false);
-          setAITypingText(null);
-          setMessages(prev => [...prev, aiMessage]);
-        }
-      }
-      typeChar();
+      setMessages(prev => [...prev, aiMessage]);
 
     } catch (error) {
       console.error('Error sending message:', error);
       toast.error('Failed to send message');
-      setIsAITyping(false);
-      setAITypingText(null);
       // Remove the user message if there was an error
       setMessages(prev => prev.filter(msg => msg.id !== userMessage.id));
     } finally {
       setLoading(false);
     }
   };
-
-  // Typing indicator component
-  const TypingIndicator = () => (
-    <div className="typing-indicator">
-      <span className="typing-dot" />
-      <span className="typing-dot" />
-      <span className="typing-dot" />
-    </div>
-  );
 
   const ChatContent = () => (
     <>
@@ -250,12 +219,12 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
               Ask anything about this event!
             </CardTitle>
           </CardHeader>
-          
+
           <CardContent className="flex-1 flex flex-col p-0">
             {/* Messages */}
             <ScrollArea className="flex-1 px-6" ref={scrollAreaRef}>
               <div className="space-y-4 pb-4">
-                {messages.length === 0 && !isAITyping && !aiTypingText ? (
+                {messages.length === 0 ? (
                   <div className="text-center py-8">
                     <p className="text-muted-foreground">
                       Start a conversation by asking about the event details, prizes, rules, or anything else!
@@ -281,7 +250,13 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
                           <div className="flex w-full gap-2 sm:gap-3 mb-3 justify-end">
                             <div
                               className="max-w-[75vw] sm:max-w-[45%] rounded-2xl px-4 py-3 text-[17px] leading-relaxed shadow-md transition-colors duration-200 font-medium whitespace-pre-wrap bg-primary text-primary-foreground ml-2 sm:ml-12 rounded-br-md"
-                              style={{ wordBreak: 'break-word', lineHeight: 1.7, padding: '14px 18px', fontSize: '17px', fontFamily: 'Times New Roman, Times, serif' }}
+                              style={{
+                                wordBreak: 'break-word',
+                                lineHeight: 1.7,
+                                padding: '14px 18px',
+                                fontSize: '17px',
+                                fontFamily: 'Times New Roman, Times, serif'
+                              }}
                             >
                               <div
                                 dangerouslySetInnerHTML={{
@@ -314,7 +289,17 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
                         ) : (
                           <div
                             className="ai-response text-[17px] font-normal whitespace-pre-wrap text-foreground"
-                            style={{ maxWidth: '95vw', marginLeft: 'auto', marginRight: 'auto', paddingLeft: 10, paddingRight: 10, wordBreak: 'break-word', lineHeight: 1.7, fontSize: '17px', fontFamily: 'Times New Roman, Times, serif' }}
+                            style={{
+                              maxWidth: '95vw',
+                              marginLeft: 'auto',
+                              marginRight: 'auto',
+                              paddingLeft: 10,
+                              paddingRight: 10,
+                              wordBreak: 'break-word',
+                              lineHeight: 1.7,
+                              fontSize: '17px',
+                              fontFamily: 'Times New Roman, Times, serif'
+                            }}
                           >
                             <div
                               dangerouslySetInnerHTML={{
@@ -339,32 +324,6 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
                         )}
                       </div>
                     ))}
-                    {/* AI Typing bubble */}
-                    {(isAITyping || aiTypingText) && (
-                      <div className="flex w-full gap-2 sm:gap-3 mb-3 justify-start">
-                        <Avatar className="h-8 w-8 bg-primary/10 mt-auto">
-                          <AvatarFallback className="text-primary text-xs">
-                            <Bot className="h-4 w-4" />
-                          </AvatarFallback>
-                        </Avatar>
-                        <div
-                          className="max-w-[85vw] sm:max-w-[70%] text-[17px] font-medium whitespace-pre-wrap text-foreground mr-2 sm:mr-12"
-                          style={{ wordBreak: 'break-word', lineHeight: 1.7, fontSize: '17px', padding: 0, background: 'none', boxShadow: 'none', minHeight: '40px', display: 'flex', alignItems: 'center' }}
-                        >
-                          {aiTypingText !== null ? (
-                            <span className="typing-text" dangerouslySetInnerHTML={{
-                              __html: aiTypingText
-                                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                                .replace(/\*(.*?)\*/g, '<em>$1</em>')
-                                .replace(/`(.*?)`/g, '<code class=\"bg-muted px-1 py-0.5 rounded text-xs\">$1</code>')
-                                .replace(/\n/g, '<br/>')
-                            }} />
-                          ) : (
-                            <TypingIndicator />
-                          )}
-                        </div>
-                      </div>
-                    )}
                   </>
                 )}
               </div>
@@ -376,11 +335,11 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
                 <Input
                   name="message"
                   placeholder="Ask about event details, prizes, rules..."
-                  disabled={loading || isAITyping}
+                  disabled={loading}
                   className="flex-1"
                   autoComplete="off"
                 />
-                <Button type="submit" disabled={loading || isAITyping} size="sm">
+                <Button type="submit" disabled={loading} size="sm">
                   <Send className="h-4 w-4" />
                 </Button>
               </form>
