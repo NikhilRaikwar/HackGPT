@@ -12,6 +12,18 @@ HackGPT is an intelligent AI assistant designed to transform hackathon data into
 - **Responsive Design**: Fully optimized for mobile, tablet, and desktop devices
 - **Real-time Chat**: Interactive chat interface with typing indicators and message history
 
+## 🔮 Coming Soon (Future Roadmap)
+
+We’re constantly improving HackGPT to become the ultimate AI-powered hackathon companion. Some exciting features in the pipeline:
+
+- **Multi-LLM Support**: Seamless integration with multiple large language models (AIML API, Anthropic, Llama 3, Mistral, etc.)  
+- **Pluggable AI/ML APIs**: Connect custom ML models and APIs for truly personalized event insights  
+- **Prize & Project Recommendations**: AI-powered suggestions for best-fit prizes and team projects  
+- **Organizers’ Dashboard**: Dedicated analytics and participant insights for organizers  
+- **Collaboration Tools**: Team-based chat with shared hackathon event knowledge  
+- **Voice Interaction**: Talk to HackGPT naturally using voice commands  
+
+
 ## 🛠️ Technology Stack
 
 - **Frontend**: React 18 with TypeScript
@@ -19,7 +31,7 @@ HackGPT is an intelligent AI assistant designed to transform hackathon data into
 - **Build Tool**: Vite
 - **Authentication**: Supabase Auth with Google OAuth
 - **Database**: Supabase PostgreSQL
-- **AI Integration**: OpenAI GPT with custom event data processing
+- **AI Integration**: AIML API GPT with custom event data processing
 - **Deployment**: Vercel-ready with environment configuration
 
 ## 🎯 Key Components
@@ -36,7 +48,7 @@ HackGPT is an intelligent AI assistant designed to transform hackathon data into
 
 - Node.js 18+ and npm
 - Supabase account and project
-- OpenAI API key (for AI functionality)
+- AIML API key (for AI functionality)
 
 ### Installation
 

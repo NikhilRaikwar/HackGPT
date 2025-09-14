@@ -9,20 +9,20 @@ const corsHeaders = {
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
 const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-const openaiApiKey = Deno.env.get('OPENAI_API_KEY');
+const aimlApiKey = Deno.env.get('AIMLAPI_KEY');
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 const createEmbedding = async (text: string): Promise<number[]> => {
-  if (!openaiApiKey) {
-    throw new Error('OpenAI API key not configured');
+  if (!aimlApiKey) {
+    throw new Error('AIML API key not configured');
   }
 
   try {
-    const response = await fetch('https://api.openai.com/v1/embeddings', {
+    const response = await fetch('https://api.aimlapi.com/v1/embeddings', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${openaiApiKey}`,
+        'Authorization': `Bearer ${aimlApiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -32,7 +32,7 @@ const createEmbedding = async (text: string): Promise<number[]> => {
     });
 
     if (!response.ok) {
-      throw new Error(`OpenAI API error: ${response.status}`);
+      throw new Error(`AIML API error: ${response.status}`);
     }
 
     const data = await response.json();
@@ -78,8 +78,8 @@ const findRelevantContent = async (eventId: string, query: string, limit = 5): P
 };
 
 const generateResponse = async (context: string[], userMessage: string): Promise<string> => {
-  if (!openaiApiKey) {
-    throw new Error('OpenAI API key not configured');
+  if (!aimlApiKey) {
+    throw new Error('AIML API key not configured');
   }
 
   const contextText = context.join('\n\n');
@@ -94,14 +94,14 @@ Based on this information, answer the user's question accurately and helpfully. 
 Be conversational but informative. Focus on providing practical and actionable information that would be useful to someone interested in participating in or learning about this event.`;
 
   try {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    const response = await fetch('https://api.aimlapi.com/v1/chat/completions', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${openaiApiKey}`,
+        'Authorization': `Bearer ${aimlApiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'gpt-4o-mini',
+        model: 'gpt-4o',
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userMessage }
@@ -112,7 +112,7 @@ Be conversational but informative. Focus on providing practical and actionable i
     });
 
     if (!response.ok) {
-      throw new Error(`OpenAI API error: ${response.status}`);
+      throw new Error(`AIML API error: ${response.status}`);
     }
 
     const data = await response.json();
@@ -164,7 +164,7 @@ serve(async (req) => {
         content: aiResponse,
         metadata: {
           context_chunks: relevantContent.length,
-          model: 'gpt-4o-mini'
+          model: 'gpt-4o'
         }
       })
       .select()

@@ -9,7 +9,7 @@ const corsHeaders = {
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
 const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-const openaiApiKey = Deno.env.get('OPENAI_API_KEY');
+const aimlApiKey = Deno.env.get('AIMLAPI_KEY');
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
@@ -75,16 +75,16 @@ const crawlUrl = async (url: string): Promise<CrawlData> => {
 };
 
 const createEmbedding = async (text: string): Promise<number[]> => {
-  if (!openaiApiKey) {
-    console.warn('OpenAI API key not found, skipping embedding generation');
+  if (!aimlApiKey) {
+    console.warn('AIML API key not found, skipping embedding generation');
     return [];
   }
 
   try {
-    const response = await fetch('https://api.openai.com/v1/embeddings', {
+    const response = await fetch('https://api.aimlapi.com/v1/embeddings', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${openaiApiKey}`,
+        'Authorization': `Bearer ${aimlApiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -94,7 +94,7 @@ const createEmbedding = async (text: string): Promise<number[]> => {
     });
 
     if (!response.ok) {
-      throw new Error(`OpenAI API error: ${response.status}`);
+      throw new Error(`AIML API error: ${response.status}`);
     }
 
     const data = await response.json();
