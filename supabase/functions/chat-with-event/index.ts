@@ -13,6 +13,25 @@ const aimlApiKey = Deno.env.get('AIMLAPI_KEY');
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
+const MODEL_CONFIG = {
+  reasoning: {
+    primary: 'deepseek/deepseek-r1',
+    fast: 'gpt-4o',
+    longForm: 'claude-3.7-sonnet-20250219',
+    openSource: 'meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo',
+  },
+  chat: {
+    primary: 'gpt-4o',
+    altFast: 'gpt-4o-mini',
+  },
+  embeddings: {
+    primary: 'text-embedding-3-large',
+    secondary: 'text-embedding-3-small',
+    voyage: 'voyage-large-2-instruct',
+    retrieval: 'togethercomputer/m2-bert-80M-32k-retrieval',
+  },
+} as const;
+
 const createEmbedding = async (text: string): Promise<number[]> => {
   if (!aimlApiKey) {
     throw new Error('AIML API key not configured');
@@ -26,7 +45,7 @@ const createEmbedding = async (text: string): Promise<number[]> => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'text-embedding-3-large',
+        model: MODEL_CONFIG.embeddings.primary,
         input: text,
       }),
     });
@@ -74,7 +93,24 @@ const findRelevantContent = async (eventId: string, query: string, limit = 5): P
   }
 };
 
-const generateResponse = async (context: string[], userMessage: string): Promise<string> => {
+const resolveChatModel = (requestedModelId?: string): string => {
+  if (!requestedModelId) return MODEL_CONFIG.chat.primary;
+
+  switch (requestedModelId) {
+    case 'deepseek-r1':
+      return MODEL_CONFIG.reasoning.primary;
+    case 'gpt-4o':
+      return MODEL_CONFIG.chat.primary;
+    case 'claude-sonnet':
+      return MODEL_CONFIG.reasoning.longForm;
+    case 'llama-405b':
+      return MODEL_CONFIG.reasoning.openSource;
+    default:
+      return MODEL_CONFIG.chat.primary;
+  }
+};
+
+const generateResponse = async (context: string[], userMessage: string, modelId?: string): Promise<string> => {
   if (!aimlApiKey) {
     throw new Error('AIML API key not configured');
   }
@@ -91,6 +127,7 @@ Based on this information, answer the user's question accurately and helpfully. 
 Be conversational but informative. Focus on providing practical and actionable information that would be useful to someone interested in participating in or learning about this event.`;
 
   try {
+    const model = resolveChatModel(modelId);
     const response = await fetch('https://api.aimlapi.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -98,7 +135,7 @@ Be conversational but informative. Focus on providing practical and actionable i
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'gpt-4o',
+        model,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userMessage }
@@ -126,7 +163,7 @@ serve(async (req) => {
   }
 
   try {
-    const { sessionId, eventId, message } = await req.json();
+    const { sessionId, eventId, message, modelId } = await req.json();
 
     if (!sessionId || !eventId || !message) {
       return new Response(
@@ -150,7 +187,7 @@ serve(async (req) => {
     }
 
     // Generate AI response
-    const aiResponse = await generateResponse(relevantContent, message);
+    const aiResponse = await generateResponse(relevantContent, message, modelId);
 
     // Save assistant message to database
     const { data: messageData, error: messageError } = await supabase

@@ -18,12 +18,6 @@ interface Message {
   created_at: string;
 }
 
-interface EventUrlSummary {
-  id: string;
-  url: string;
-  title: string | null;
-}
-
 interface ChatInterfaceProps {
   eventId: string;
   onBack: () => void;
@@ -38,7 +32,7 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [eventName, setEventName] = useState<string>('');
   const [eventStatus, setEventStatus] = useState<'pending' | 'crawling' | 'completed' | 'failed' | ''>('');
-  const [eventUrls, setEventUrls] = useState<EventUrlSummary[]>([]);
+  const [modelId, setModelId] = useState<string | null>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -60,31 +54,16 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
     try {
       const { data, error } = await supabase
         .from('events')
-        .select('name, status')
+        .select('name, status, model_id')
         .eq('id', eventId)
         .single();
 
       if (error) throw error;
       setEventName(data.name);
       setEventStatus(data.status as 'pending' | 'crawling' | 'completed' | 'failed');
+      setModelId((data as any).model_id ?? null);
     } catch (error) {
       console.error('Error loading event details:', error);
-    }
-  };
-
-  const loadEventUrls = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('event_urls')
-        .select('id, url, title')
-        .eq('event_id', eventId)
-        .order('created_at', { ascending: true });
-
-      if (error) throw error;
-
-      setEventUrls((data as EventUrlSummary[]) || []);
-    } catch (error) {
-      console.error('Error loading event URLs:', error);
     }
   };
 
@@ -132,9 +111,6 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
 
       if (messagesError) throw messagesError;
       setMessages((existingMessages as Message[]) || []);
-
-      // Load crawled URLs for this event
-      await loadEventUrls();
 
     } catch (error) {
       console.error('Error initializing chat:', error);
@@ -196,7 +172,8 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
         body: {
           sessionId,
           eventId,
-          message: content
+          message: content,
+          modelId: modelId || 'gpt-4o',
         }
       });
 
@@ -265,18 +242,6 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
                         ? 'HackGPT has finished crawling the pages for this hackathon. You can ask anything about the rules, prizes, timeline, or FAQs.'
                         : 'HackGPT is crawling this hackathon and indexing its pages. You can already start asking questions while crawling continues in the background.'}
                     </p>
-                    {eventUrls.length > 0 && (
-                      <div className="mt-2">
-                        <p className="text-xs text-muted-foreground mb-1">Crawled pages:</p>
-                        <select className="w-full text-xs rounded-md border border-border bg-background px-2 py-1">
-                          {eventUrls.map((u) => (
-                            <option key={u.id} value={u.url}>
-                              {u.title || u.url}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
                   </div>
                 </div>
 
