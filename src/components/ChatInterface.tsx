@@ -188,6 +188,11 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
     e.preventDefault();
     if (!sessionId) return;
 
+    if (!modelId) {
+      toast.error('This event has no model configured. Please recreate the assistant with a model selected.');
+      return;
+    }
+
     const formData = new FormData(e.currentTarget);
     const content = formData.get('message') as string;
 
@@ -233,13 +238,13 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
           : msg
       ));
 
-      // Call chatbot function and display response instantly
+      // Call chatbot function and display response instantly, using the event's configured model
       const { data: response, error: chatError } = await supabase.functions.invoke('chat-with-event', {
         body: {
           sessionId,
           eventId,
           message: content,
-          modelId: modelId || 'gpt-4o',
+          modelId,
         }
       });
 

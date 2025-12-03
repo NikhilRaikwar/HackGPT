@@ -94,8 +94,14 @@ const findRelevantContent = async (eventId: string, query: string, limit = 5): P
 };
 
 const resolveChatModel = (requestedModelId?: string): string => {
-  if (!requestedModelId) return MODEL_CONFIG.chat.primary;
+  if (!requestedModelId) {
+    throw new Error('No model configured for this event');
+  }
 
+  // If the caller already passed a full model id (e.g. "deepseek/deepseek-r1"), trust it
+  if (requestedModelId.includes('/')) return requestedModelId;
+
+  // Map short IDs stored in events.model_id / dashboard select to concrete provider models
   switch (requestedModelId) {
     case 'deepseek-r1':
       return MODEL_CONFIG.reasoning.primary;
@@ -106,7 +112,7 @@ const resolveChatModel = (requestedModelId?: string): string => {
     case 'llama-405b':
       return MODEL_CONFIG.reasoning.openSource;
     default:
-      return MODEL_CONFIG.chat.primary;
+      throw new Error(`Unknown model id for event: ${requestedModelId}`);
   }
 };
 
@@ -186,8 +192,11 @@ serve(async (req) => {
       );
     }
 
-    // Generate AI response
+    // Generate AI response with the event's configured model
     const aiResponse = await generateResponse(relevantContent, message, modelId);
+
+    // Resolve the concrete model used so we can store it alongside the message
+    const resolvedModel = resolveChatModel(modelId);
 
     // Save assistant message to database
     const { data: messageData, error: messageError } = await supabase
@@ -198,7 +207,7 @@ serve(async (req) => {
         content: aiResponse,
         metadata: {
           context_chunks: relevantContent.length,
-          model: 'gpt-4o'
+          model: resolvedModel,
         }
       })
       .select()

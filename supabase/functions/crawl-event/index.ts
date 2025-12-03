@@ -294,19 +294,33 @@ serve(async (req) => {
 
     console.log(`Starting crawl for event ${eventId}, URL: ${url}`);
 
-    // Resolve effective modelId: prefer request, then events table, then default
-    let effectiveModelId = typeof modelId === 'string' && modelId.length > 0 ? modelId : 'gpt-4o';
+    // Resolve effective modelId: require a configured model, do not fall back silently
+    let effectiveModelId: string | null = null;
 
-    if (!modelId) {
+    if (typeof modelId === 'string' && modelId.length > 0) {
+      effectiveModelId = modelId;
+    } else {
       const { data: existingEvent, error: eventError } = await supabase
         .from('events')
         .select('model_id')
         .eq('id', eventId)
         .single();
 
-      if (!eventError && existingEvent && (existingEvent as any).model_id) {
+      if (eventError) {
+        console.error('Error loading event for model resolution:', eventError);
+      }
+
+      if (existingEvent && (existingEvent as any).model_id) {
         effectiveModelId = (existingEvent as any).model_id as string;
       }
+    }
+
+    if (!effectiveModelId) {
+      console.error('No model configured for event, aborting crawl:', eventId);
+      return new Response(
+        JSON.stringify({ error: 'No model configured for this event. Please recreate the assistant with a model selected.' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     // Update event status to crawling and persist effective model id
