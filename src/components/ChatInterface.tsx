@@ -18,6 +18,12 @@ interface Message {
   created_at: string;
 }
 
+interface EventUrlSummary {
+  id: string;
+  url: string;
+  title: string | null;
+}
+
 interface ChatInterfaceProps {
   eventId: string;
   onBack: () => void;
@@ -31,6 +37,8 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
   const [loading, setLoading] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [eventName, setEventName] = useState<string>('');
+  const [eventStatus, setEventStatus] = useState<'pending' | 'crawling' | 'completed' | 'failed' | ''>('');
+  const [eventUrls, setEventUrls] = useState<EventUrlSummary[]>([]);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -52,14 +60,31 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
     try {
       const { data, error } = await supabase
         .from('events')
-        .select('name')
+        .select('name, status')
         .eq('id', eventId)
         .single();
 
       if (error) throw error;
       setEventName(data.name);
+      setEventStatus(data.status as 'pending' | 'crawling' | 'completed' | 'failed');
     } catch (error) {
       console.error('Error loading event details:', error);
+    }
+  };
+
+  const loadEventUrls = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('event_urls')
+        .select('id, url, title')
+        .eq('event_id', eventId)
+        .order('created_at', { ascending: true });
+
+      if (error) throw error;
+
+      setEventUrls((data as EventUrlSummary[]) || []);
+    } catch (error) {
+      console.error('Error loading event URLs:', error);
     }
   };
 
@@ -107,6 +132,9 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
 
       if (messagesError) throw messagesError;
       setMessages((existingMessages as Message[]) || []);
+
+      // Load crawled URLs for this event
+      await loadEventUrls();
 
     } catch (error) {
       console.error('Error initializing chat:', error);
@@ -224,9 +252,37 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
             {/* Messages */}
             <ScrollArea className="flex-1 px-6" ref={scrollAreaRef}>
               <div className="space-y-4 pb-4">
+                {/* Initial agent message about crawling status and URLs */}
+                <div className="flex w-full gap-3 mb-3 justify-start">
+                  <Avatar className="h-8 w-8 bg-primary/10 mt-1">
+                    <AvatarFallback className="text-primary text-xs">
+                      <Bot className="h-4 w-4" />
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1 max-w-[95vw] rounded-2xl bg-muted/60 px-4 py-3 text-[15px] leading-relaxed shadow-sm">
+                    <p className="mb-2">
+                      {eventStatus === 'completed'
+                        ? 'HackGPT has finished crawling the pages for this hackathon. You can ask anything about the rules, prizes, timeline, or FAQs.'
+                        : 'HackGPT is crawling this hackathon and indexing its pages. You can already start asking questions while crawling continues in the background.'}
+                    </p>
+                    {eventUrls.length > 0 && (
+                      <div className="mt-2">
+                        <p className="text-xs text-muted-foreground mb-1">Crawled pages:</p>
+                        <select className="w-full text-xs rounded-md border border-border bg-background px-2 py-1">
+                          {eventUrls.map((u) => (
+                            <option key={u.id} value={u.url}>
+                              {u.title || u.url}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
                 {messages.length === 0 ? (
-                  <div className="text-center py-8">
-                    <p className="text-muted-foreground">
+                  <div className="text-center py-4">
+                    <p className="text-muted-foreground text-sm">
                       Start a conversation by asking about the event details, prizes, rules, or anything else!
                     </p>
                   </div>

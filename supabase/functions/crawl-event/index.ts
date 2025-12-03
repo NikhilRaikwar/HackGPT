@@ -16,10 +16,17 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 interface CrawlData {
   title: string;
   content: string;
+  html: string;
+  links: {
+    internal: string[];
+    external: string[];
+  };
   metadata: {
     url: string;
     crawled_at: string;
     word_count: number;
+    internal_links: number;
+    external_links: number;
   };
 }
 
@@ -38,6 +45,32 @@ const extractTextFromHtml = (html: string): string => {
   return text;
 };
 
+const extractLinks = (html: string, baseUrl: string): { internal: string[]; external: string[] } => {
+  const internal: string[] = [];
+  const external: string[] = [];
+  const anchorRegex = /<a[^>]+href=["']([^"'#]+)["'][^>]*>/gi;
+  let match: RegExpExecArray | null;
+
+  const base = new URL(baseUrl);
+
+  while ((match = anchorRegex.exec(html)) !== null) {
+    try {
+      const href = match[1];
+      const absolute = new URL(href, base).toString();
+      const hostMatches = new URL(absolute).hostname === base.hostname;
+      if (hostMatches) {
+        if (!internal.includes(absolute)) internal.push(absolute);
+      } else {
+        if (!external.includes(absolute)) external.push(absolute);
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return { internal, external };
+};
+
 const crawlUrl = async (url: string): Promise<CrawlData> => {
   try {
     console.log(`Crawling URL: ${url}`);
@@ -54,6 +87,7 @@ const crawlUrl = async (url: string): Promise<CrawlData> => {
 
     const html = await response.text();
     const content = extractTextFromHtml(html);
+    const links = extractLinks(html, url);
     
     // Extract title from HTML
     const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
@@ -62,10 +96,14 @@ const crawlUrl = async (url: string): Promise<CrawlData> => {
     return {
       title,
       content,
+      html,
+      links,
       metadata: {
         url,
         crawled_at: new Date().toISOString(),
         word_count: content.split(/\s+/).length,
+        internal_links: links.internal.length,
+        external_links: links.external.length,
       }
     };
   } catch (error) {
@@ -88,7 +126,7 @@ const createEmbedding = async (text: string): Promise<number[]> => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'text-embedding-ada-002',
+        model: 'text-embedding-3-large',
         input: text.substring(0, 8000), // Limit to 8k chars
       }),
     });
@@ -126,13 +164,108 @@ const chunkText = (text: string, maxChunkSize = 1000): string[] => {
   return chunks.filter(chunk => chunk.length > 50); // Filter out very short chunks
 };
 
+interface CrawlConfig {
+  maxDepth: number;
+  maxPages: number;
+  includeExternal: boolean;
+}
+
+const crawlSite = async (
+  eventId: string,
+  rootUrl: string,
+  config: CrawlConfig,
+) => {
+  const visited = new Set<string>();
+  const queue: { url: string; depth: number }[] = [{ url: rootUrl, depth: 0 }];
+  let totalChunks = 0;
+  let totalWords = 0;
+  let urlsProcessed = 0;
+
+  while (queue.length > 0 && urlsProcessed < config.maxPages) {
+    const current = queue.shift()!;
+    if (visited.has(current.url)) {
+      continue;
+    }
+    visited.add(current.url);
+
+    try {
+      const crawlData = await crawlUrl(current.url);
+
+      const { data: urlData, error: urlError } = await supabase
+        .from('event_urls')
+        .insert({
+          event_id: eventId,
+          url: current.url,
+          title: crawlData.title,
+          content: crawlData.content,
+          metadata: crawlData.metadata,
+          crawl_status: 'completed',
+        })
+        .select()
+        .single();
+
+      if (urlError) {
+        throw urlError;
+      }
+
+      const chunks = chunkText(crawlData.content);
+
+      const embeddingPromises = chunks.map(async (chunk, index) => {
+        const embedding = await createEmbedding(chunk);
+
+        return supabase
+          .from('content_embeddings')
+          .insert({
+            event_id: eventId,
+            url_id: urlData.id,
+            content_chunk: chunk,
+            embedding: embedding.length > 0 ? embedding : null,
+            metadata: {
+              chunk_index: index,
+              chunk_length: chunk.length,
+            },
+          });
+      });
+
+      await Promise.all(embeddingPromises);
+
+      totalChunks += chunks.length;
+      totalWords += crawlData.metadata.word_count;
+      urlsProcessed += 1;
+
+      if (current.depth < config.maxDepth) {
+        const nextDepth = current.depth + 1;
+        const nextUrls: string[] = [];
+        nextUrls.push(...crawlData.links.internal);
+        if (config.includeExternal) {
+          nextUrls.push(...crawlData.links.external);
+        }
+        for (const nextUrl of nextUrls) {
+          if (!visited.has(nextUrl)) {
+            queue.push({ url: nextUrl, depth: nextDepth });
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error processing URL in crawlSite:', error);
+      continue;
+    }
+  }
+
+  return {
+    totalChunks,
+    totalWords,
+    urlsProcessed,
+  };
+};
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { eventId, url } = await req.json();
+    const { eventId, url, maxDepth, maxPages, includeExternal } = await req.json();
 
     if (!eventId || !url) {
       return new Response(
@@ -150,47 +283,13 @@ serve(async (req) => {
       .eq('id', eventId);
 
     try {
-      // Crawl the main URL
-      const crawlData = await crawlUrl(url);
+      const crawlConfig: CrawlConfig = {
+        maxDepth: typeof maxDepth === 'number' ? maxDepth : 0,
+        maxPages: typeof maxPages === 'number' ? maxPages : 1,
+        includeExternal: typeof includeExternal === 'boolean' ? includeExternal : false,
+      };
 
-      // Save URL data
-      const { data: urlData, error: urlError } = await supabase
-        .from('event_urls')
-        .insert({
-          event_id: eventId,
-          url: url,
-          title: crawlData.title,
-          content: crawlData.content,
-          metadata: crawlData.metadata,
-          crawl_status: 'completed'
-        })
-        .select()
-        .single();
-
-      if (urlError) throw urlError;
-
-      // Chunk the content and create embeddings
-      const chunks = chunkText(crawlData.content);
-      console.log(`Created ${chunks.length} content chunks`);
-
-      const embeddingPromises = chunks.map(async (chunk, index) => {
-        const embedding = await createEmbedding(chunk);
-        
-        return supabase
-          .from('content_embeddings')
-          .insert({
-            event_id: eventId,
-            url_id: urlData.id,
-            content_chunk: chunk,
-            embedding: embedding.length > 0 ? JSON.stringify(embedding) : null,
-            metadata: {
-              chunk_index: index,
-              chunk_length: chunk.length,
-            }
-          });
-      });
-
-      await Promise.all(embeddingPromises);
+      const result = await crawlSite(eventId, url, crawlConfig);
 
       // Update event with crawl data and mark as completed
       await supabase
@@ -198,10 +297,11 @@ serve(async (req) => {
         .update({
           status: 'completed',
           crawl_data: {
-            total_chunks: chunks.length,
-            total_words: crawlData.metadata.word_count,
+            total_chunks: result.totalChunks,
+            total_words: result.totalWords,
             crawled_at: new Date().toISOString(),
-            urls_processed: 1
+            urls_processed: result.urlsProcessed,
+            config: crawlConfig,
           }
         })
         .eq('id', eventId);
@@ -211,8 +311,9 @@ serve(async (req) => {
       return new Response(
         JSON.stringify({ 
           success: true, 
-          chunks_created: chunks.length,
-          words_processed: crawlData.metadata.word_count
+          chunks_created: result.totalChunks,
+          words_processed: result.totalWords,
+          urls_processed: result.urlsProcessed,
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
