@@ -111,10 +111,21 @@ export const Dashboard = () => {
         .single();
 
       if (error) throw error;
+      
+      // Shallow crawl to analyze links (non-blocking for user, but gives agent context)
+      await supabase.functions.invoke('shallow-crawl', {
+        body: { url: eventUrl }
+      });
 
-      // Start crawling process
+      // Start crawling process with default config
       const { error: crawlError } = await supabase.functions.invoke('crawl-event', {
-        body: { eventId: data.id, url: eventUrl }
+        body: {
+          eventId: data.id,
+          url: eventUrl,
+          maxDepth: 1,
+          maxPages: 10,
+          includeExternal: false
+        }
       });
 
       if (crawlError) {

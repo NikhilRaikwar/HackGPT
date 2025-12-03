@@ -26,7 +26,7 @@ const createEmbedding = async (text: string): Promise<number[]> => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'text-embedding-ada-002',
+        model: 'text-embedding-3-large',
         input: text,
       }),
     });
@@ -48,19 +48,16 @@ const findRelevantContent = async (eventId: string, query: string, limit = 5): P
     // Create embedding for the query
     const queryEmbedding = await createEmbedding(query);
     
-    // Search for similar content using vector similarity
-    const { data, error } = await supabase
-      .from('content_embeddings')
-      .select('content_chunk, metadata')
-      .eq('event_id', eventId)
-      .neq('embedding', null)
-      .limit(limit);
+    // Use pgvector similarity via RPC to find the most relevant chunks
+    const { data, error } = await supabase.rpc('match_event_content', {
+      event_id: eventId,
+      query_embedding: queryEmbedding,
+      match_count: limit,
+    });
 
     if (error) throw error;
 
-    // For now, return all content since we don't have vector similarity search set up
-    // In a production environment, you'd use pgvector's similarity functions
-    return data?.map(item => item.content_chunk) || [];
+    return (data as { content_chunk: string }[] | null)?.map(item => item.content_chunk) || [];
     
   } catch (error) {
     console.error('Error finding relevant content:', error);
