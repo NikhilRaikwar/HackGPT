@@ -7,7 +7,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import { ArrowLeft, Send, Bot } from 'lucide-react';
+import { ArrowLeft, Send, Bot, Trash2 } from 'lucide-react';
 import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar';
 import { AppSidebar } from '@/components/AppSidebar';
 
@@ -37,10 +37,16 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
 
   useEffect(() => {
     if (user && eventId) {
-      initializeChat();
-      loadEventDetails();
+      // Only initialize chat after verifying the event exists
+      const init = async () => {
+        const eventExists = await loadEventDetails();
+        if (eventExists) {
+          await initializeChat();
+        }
+      };
+      init();
     }
-    // eslint-disable-next-line
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, eventId]);
 
   useEffect(() => {
@@ -50,25 +56,73 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
     }
   }, [messages]);
 
-  const loadEventDetails = async () => {
+  const loadEventDetails = async (): Promise<boolean> => {
     try {
       const { data, error } = await supabase
         .from('events')
         .select('name, status, model_id')
         .eq('id', eventId)
-        .single();
+        .maybeSingle();
 
       if (error) throw error;
+      
+      if (!data) {
+        toast.error('Event not found. It may have been deleted.');
+        onBack();
+        return false;
+      }
+      
       setEventName(data.name);
       setEventStatus(data.status as 'pending' | 'crawling' | 'completed' | 'failed');
       setModelId((data as any).model_id ?? null);
+      return true;
     } catch (error) {
       console.error('Error loading event details:', error);
+      toast.error('Failed to load event details');
+      onBack();
+      return false;
+    }
+  };
+
+  const deleteChatSession = async () => {
+    if (!sessionId) return;
+
+    const confirmed = window.confirm('Are you sure you want to delete this chat? This action cannot be undone.');
+    if (!confirmed) return;
+
+    try {
+      const { error } = await supabase
+        .from('chat_sessions')
+        .delete()
+        .eq('id', sessionId);
+
+      if (error) throw error;
+
+      toast.success('Chat deleted successfully');
+      setMessages([]);
+      setSessionId(null);
+      onBack();
+    } catch (error) {
+      console.error('Error deleting chat session:', error);
+      toast.error('Failed to delete chat');
     }
   };
 
   const initializeChat = async () => {
+    if (!eventId) {
+      toast.error('No event selected');
+      onBack();
+      return;
+    }
+
     try {
+      // First verify the event exists
+      const eventExists = await loadEventDetails();
+      if (!eventExists) {
+        console.error('Event does not exist, cannot initialize chat');
+        return;
+      }
+
       // Check for existing session
       const { data: existingSessions, error: sessionError } = await supabase
         .from('chat_sessions')
@@ -85,7 +139,11 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
       if (existingSessions && existingSessions.length > 0) {
         currentSessionId = existingSessions[0].id;
       } else {
-        // Create new session
+        // Create new session only if we have a valid eventId
+        if (!eventId) {
+          throw new Error('Cannot create chat session: eventId is missing');
+        }
+
         const { data: newSession, error: createError } = await supabase
           .from('chat_sessions')
           .insert({
@@ -96,7 +154,15 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
           .select()
           .single();
 
-        if (createError) throw createError;
+        if (createError) {
+          console.error('Failed to create chat session:', createError);
+          throw createError;
+        }
+        
+        if (!newSession) {
+          throw new Error('Failed to create chat session: No session data returned');
+        }
+        
         currentSessionId = newSession.id;
       }
 
@@ -212,6 +278,16 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
               <h1 className="text-lg font-semibold">Chat with Event Assistant</h1>
               <p className="text-sm text-muted-foreground">{eventName}</p>
             </div>
+            {sessionId && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="ml-auto text-destructive hover:text-destructive hover:bg-destructive/10"
+                onClick={deleteChatSession}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            )}
           </div>
         </header>
       )}
