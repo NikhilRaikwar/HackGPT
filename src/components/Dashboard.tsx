@@ -30,6 +30,7 @@ interface Event {
   original_url: string;
   status: 'pending' | 'crawling' | 'completed' | 'failed';
   created_at: string;
+  model_id: string;
 }
 
 export const Dashboard = () => {
@@ -43,6 +44,7 @@ export const Dashboard = () => {
   const [submitting, setSubmitting] = useState(false);
   const [eventName, setEventName] = useState("");
   const [eventUrl, setEventUrl] = useState("");
+  const [modelId, setModelId] = useState<string>('gpt-4o');
 
   const getUserDisplayName = () => {
     return user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email || 'User';
@@ -105,26 +107,23 @@ export const Dashboard = () => {
           user_id: user?.id,
           name: eventName || 'Untitled Event',
           original_url: eventUrl,
-          status: 'pending'
+          status: 'pending',
+          model_id: modelId,
         })
         .select()
         .single();
 
       if (error) throw error;
       
-      // Shallow crawl to analyze links (non-blocking for user, but gives agent context)
-      await supabase.functions.invoke('shallow-crawl', {
-        body: { url: eventUrl }
-      });
-
-      // Start crawling process with default config
+      // Start crawling process with default config (deeper crawl)
       const { error: crawlError } = await supabase.functions.invoke('crawl-event', {
         body: {
           eventId: data.id,
           url: eventUrl,
-          maxDepth: 1,
-          maxPages: 10,
-          includeExternal: false
+          maxDepth: 2,
+          maxPages: 20,
+          includeExternal: true,
+          modelId,
         }
       });
 
@@ -137,6 +136,8 @@ export const Dashboard = () => {
         // Clear the form
         setEventName("");
         setEventUrl("");
+        setModelId('gpt-4o');
+
         // Automatically open the chat for the new event
         setSelectedEventId(data.id);
         setSelectedEventName(data.name);
@@ -283,6 +284,25 @@ export const Dashboard = () => {
                                   required
                                   className="h-12 px-4 border-border/50 bg-background/50 backdrop-blur-sm transition-all duration-300 focus:border-primary/50 focus:ring-2 focus:ring-primary/20 group-hover:border-primary/30"
                                 />
+                                <div className="absolute inset-0 rounded-md bg-gradient-to-r from-primary/5 to-primary/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
+                              </div>
+                            </div>
+                            <div className="space-y-2">
+                              <Label htmlFor="model-id" className="text-sm font-medium text-foreground">
+                                Model for this assistant
+                              </Label>
+                              <div className="relative group">
+                                <select
+                                  id="model-id"
+                                  value={modelId}
+                                  onChange={(e) => setModelId(e.target.value)}
+                                  className="h-12 w-full px-4 border border-border/50 bg-background/50 backdrop-blur-sm rounded-md text-sm focus:outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/20 group-hover:border-primary/30"
+                                >
+                                  <option value="deepseek-r1">DeepSeek R1 – complex reasoning</option>
+                                  <option value="gpt-4o">GPT-4o – fast, balanced (chat + vision)</option>
+                                  <option value="claude-sonnet">Claude 3.7 Sonnet – long-form analysis</option>
+                                  <option value="llama-405b">Llama 3.1 405B – open-source reasoning</option>
+                                </select>
                                 <div className="absolute inset-0 rounded-md bg-gradient-to-r from-primary/5 to-primary/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
                               </div>
                             </div>

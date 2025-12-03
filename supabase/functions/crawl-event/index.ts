@@ -13,6 +13,24 @@ const aimlApiKey = Deno.env.get('AIMLAPI_KEY');
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
+const MODEL_CONFIG = {
+  embeddings: {
+    primary: 'text-embedding-3-large',
+    secondary: 'text-embedding-3-small',
+    voyage: 'voyage-large-2-instruct',
+    retrieval: 'togethercomputer/m2-bert-80M-32k-retrieval',
+  },
+  chat: {
+    primary: 'gpt-4o',
+  },
+  reasoning: {
+    primary: 'deepseek/deepseek-r1',
+    fast: 'gpt-4o',
+    longForm: 'claude-3.7-sonnet-20250219',
+    openSource: 'meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo',
+  },
+} as const;
+
 interface CrawlData {
   title: string;
   content: string;
@@ -126,7 +144,7 @@ const createEmbedding = async (text: string): Promise<number[]> => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'text-embedding-3-large',
+        model: MODEL_CONFIG.embeddings.primary,
         input: text.substring(0, 8000), // Limit to 8k chars
       }),
     });
@@ -265,7 +283,7 @@ serve(async (req) => {
   }
 
   try {
-    const { eventId, url, maxDepth, maxPages, includeExternal } = await req.json();
+    const { eventId, url, maxDepth, maxPages, includeExternal, modelId } = await req.json();
 
     if (!eventId || !url) {
       return new Response(
@@ -276,10 +294,25 @@ serve(async (req) => {
 
     console.log(`Starting crawl for event ${eventId}, URL: ${url}`);
 
-    // Update event status to crawling
+    // Resolve effective modelId: prefer request, then events table, then default
+    let effectiveModelId = typeof modelId === 'string' && modelId.length > 0 ? modelId : 'gpt-4o';
+
+    if (!modelId) {
+      const { data: existingEvent, error: eventError } = await supabase
+        .from('events')
+        .select('model_id')
+        .eq('id', eventId)
+        .single();
+
+      if (!eventError && existingEvent && (existingEvent as any).model_id) {
+        effectiveModelId = (existingEvent as any).model_id as string;
+      }
+    }
+
+    // Update event status to crawling and persist effective model id
     await supabase
       .from('events')
-      .update({ status: 'crawling' })
+      .update({ status: 'crawling', model_id: effectiveModelId })
       .eq('id', eventId);
 
     try {
@@ -287,6 +320,7 @@ serve(async (req) => {
         maxDepth: typeof maxDepth === 'number' ? maxDepth : 0,
         maxPages: typeof maxPages === 'number' ? maxPages : 1,
         includeExternal: typeof includeExternal === 'boolean' ? includeExternal : false,
+        modelId: effectiveModelId,
       };
 
       const result = await crawlSite(eventId, url, crawlConfig);
