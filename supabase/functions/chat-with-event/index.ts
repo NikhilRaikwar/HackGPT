@@ -182,21 +182,26 @@ serve(async (req) => {
 
     // Find relevant content based on the user's message
     const relevantContent = await findRelevantContent(eventId, message);
-    
+
+    let aiResponse: string;
+    let resolvedModel: string;
+
     if (relevantContent.length === 0) {
-      return new Response(
-        JSON.stringify({ 
-          error: 'No event content found. The event may still be processing.' 
-        }),
-        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      // Graceful fallback when no content is available for this event
+      resolvedModel = resolveChatModel(modelId);
+      aiResponse = `I couldn't find any indexed content for this event yet. This usually means the crawl didn't extract readable text from the page or is still processing.
+
+Here are a few things you can try:
+- Recheck that the hackathon URL is publicly accessible and not behind a login.
+- Recreate the assistant and make sure crawling completes.
+- If the event page is mostly images or scripts, I may not be able to read detailed rules.
+
+You can still ask me general questions about participating in hackathons, but I won't have specific details about this event until its content is available.`;
+    } else {
+      // Generate AI response with the event's configured model using the retrieved context
+      aiResponse = await generateResponse(relevantContent, message, modelId);
+      resolvedModel = resolveChatModel(modelId);
     }
-
-    // Generate AI response with the event's configured model
-    const aiResponse = await generateResponse(relevantContent, message, modelId);
-
-    // Resolve the concrete model used so we can store it alongside the message
-    const resolvedModel = resolveChatModel(modelId);
 
     // Save assistant message to database
     const { data: messageData, error: messageError } = await supabase

@@ -33,6 +33,7 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
   const [eventName, setEventName] = useState<string>('');
   const [eventStatus, setEventStatus] = useState<'pending' | 'crawling' | 'completed' | 'failed' | ''>('');
   const [modelId, setModelId] = useState<string | null>(null);
+  const [hasTriggeredRecrawl, setHasTriggeredRecrawl] = useState(false);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -60,7 +61,7 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
     try {
       const { data, error } = await supabase
         .from('events')
-        .select('name, status, model_id')
+        .select('name, status, model_id, original_url')
         .eq('id', eventId)
         .maybeSingle();
 
@@ -75,6 +76,31 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
       setEventName(data.name);
       setEventStatus(data.status as 'pending' | 'crawling' | 'completed' | 'failed');
       setModelId((data as any).model_id ?? null);
+
+      // Auto-trigger a background recrawl once per mount so returning users
+      // always get fresh content without having to manually restart.
+      if (!hasTriggeredRecrawl && (data as any).original_url && (data as any).model_id) {
+        setHasTriggeredRecrawl(true);
+        supabase.functions
+          .invoke('crawl-event', {
+            body: {
+              eventId,
+              url: (data as any).original_url,
+              maxDepth: 2,
+              maxPages: 20,
+              includeExternal: true,
+              modelId: (data as any).model_id as string,
+            },
+          })
+          .then(({ error }) => {
+            if (error) {
+              console.error('Background recrawl failed:', error);
+            }
+          })
+          .catch((err) => {
+            console.error('Error invoking background recrawl:', err);
+          });
+      }
       return true;
     } catch (error) {
       console.error('Error loading event details:', error);
