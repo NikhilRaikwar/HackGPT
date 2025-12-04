@@ -44,6 +44,18 @@ interface Event {
   created_at: string;
 }
 
+interface ChatSession {
+  id: string;
+  event_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  event?: {
+    name: string;
+    status: string;
+  };
+}
+
 export function AppSidebar({ 
   onEventSelect, 
   selectedEventId,
@@ -54,43 +66,108 @@ export function AppSidebar({
 }) {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [events, setEvents] = useState<Event[]>([]);
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     if (user) {
-      loadEvents();
+      loadChatSessions();
+      
+      // Subscribe to new chat sessions
+      const channel = supabase
+        .channel('chat-sessions-changes')
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'chat_sessions',
+            filter: `user_id=eq.${user.id}`,
+          },
+          () => {
+            loadChatSessions();
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
     }
-  }, [user]);
+  }, [user, refreshKey]);
 
-  const loadEvents = async () => {
+  // Expose refresh function via window for ChatInterface to call
+  useEffect(() => {
+    (window as any).refreshChatHistory = () => {
+      setRefreshKey(prev => prev + 1);
+    };
+    return () => {
+      delete (window as any).refreshChatHistory;
+    };
+  }, []);
+
+  const loadChatSessions = async () => {
+    if (!user) return;
+    
     try {
-      const { data, error } = await supabase
-        .from('events')
-        .select('*')
-        .eq('status', 'completed')
-        .order('created_at', { ascending: false });
+      // First get chat sessions
+      const { data: sessionsData, error: sessionsError } = await supabase
+        .from('chat_sessions')
+        .select('id, event_id, title, created_at, updated_at')
+        .eq('user_id', user.id)
+        .order('updated_at', { ascending: false })
+        .limit(20);
 
-      if (error) throw error;
-      setEvents((data as Event[]) || []);
+      if (sessionsError) throw sessionsError;
+      
+      if (!sessionsData || sessionsData.length === 0) {
+        setChatSessions([]);
+        return;
+      }
+
+      // Get event IDs and fetch event details
+      const eventIds = sessionsData.map(s => s.event_id);
+      const { data: eventsData } = await supabase
+        .from('events')
+        .select('id, name, status')
+        .in('id', eventIds);
+
+      // Create a map for quick lookup
+      const eventsMap = new Map(
+        (eventsData || []).map((e: any) => [e.id, { name: e.name, status: e.status }])
+      );
+      
+      // Combine sessions with event data
+      const sessions = sessionsData.map((session: any) => ({
+        id: session.id,
+        event_id: session.event_id,
+        title: session.title,
+        created_at: session.created_at,
+        updated_at: session.updated_at,
+        event: eventsMap.get(session.event_id) || null,
+      }));
+      
+      setChatSessions(sessions as ChatSession[]);
     } catch (error) {
-      console.error('Error loading events:', error);
+      console.error('Error loading chat sessions:', error);
+      setChatSessions([]);
     }
   };
 
-  const handleDeleteEvent = async (eventId: string, eventName: string) => {
+  const handleDeleteChatSession = async (sessionId: string, sessionTitle: string) => {
     try {
       const { error } = await supabase
-        .from('events')
+        .from('chat_sessions')
         .delete()
-        .eq('id', eventId);
+        .eq('id', sessionId);
 
       if (error) throw error;
       
-      toast.success(`Deleted "${eventName}" successfully`);
-      loadEvents();
+      toast.success(`Deleted chat "${sessionTitle}" successfully`);
+      loadChatSessions();
     } catch (error) {
-      console.error('Error deleting event:', error);
-      toast.error('Failed to delete event');
+      console.error('Error deleting chat session:', error);
+      toast.error('Failed to delete chat');
     }
   };
 
@@ -129,53 +206,65 @@ export function AppSidebar({
           <SidebarGroupLabel>Chat History</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {events.length === 0 ? (
+              {chatSessions.length === 0 ? (
                 <div className="p-2 text-sm text-muted-foreground text-center">
-                  No chats yet
+                  No chats yet. Start a conversation to see it here.
                 </div>
               ) : (
-                events.map((event) => (
-                  <SidebarMenuItem key={event.id} className="group">
-                    <SidebarMenuButton 
-                      onClick={() => onEventSelect?.(event.id)}
-                      className="w-full justify-between pr-1"
-                    >
-                      <div className="flex items-center gap-2 flex-1 min-w-0">
-                        <MessageSquare className="h-4 w-4 flex-shrink-0" />
-                        <span className="truncate text-sm">{event.name}</span>
-                      </div>
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>Delete Chat</AlertDialogTitle>
-                            <AlertDialogDescription>
-                              Are you sure you want to delete "{event.name}"? This action cannot be undone.
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>Cancel</AlertDialogCancel>
-                            <AlertDialogAction 
-                              onClick={() => handleDeleteEvent(event.id, event.name)}
-                              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                chatSessions.map((session) => {
+                  const displayName = session.event?.name || session.title || 'Untitled Chat';
+                  const isSelected = selectedEventId === session.event_id;
+                  
+                  return (
+                    <SidebarMenuItem key={session.id} className="group">
+                      <SidebarMenuButton 
+                        onClick={() => onEventSelect?.(session.event_id)}
+                        className={`w-full justify-between pr-1 ${isSelected ? 'bg-accent' : ''}`}
+                      >
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          <MessageSquare className="h-4 w-4 flex-shrink-0" />
+                          <div className="flex flex-col flex-1 min-w-0">
+                            <span className="truncate text-sm font-medium">{displayName}</span>
+                            {session.event && (
+                              <span className="truncate text-xs text-muted-foreground">
+                                {new Date(session.updated_at).toLocaleDateString()}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                              onClick={(e) => e.stopPropagation()}
                             >
-                              Delete
-                            </AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Delete Chat</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                Are you sure you want to delete this chat? This action cannot be undone.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogAction 
+                                onClick={() => handleDeleteChatSession(session.id, displayName)}
+                                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                              >
+                                Delete
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })
               )}
             </SidebarMenu>
           </SidebarGroupContent>

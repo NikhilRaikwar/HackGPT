@@ -22,8 +22,14 @@ import { ChatInterface } from './ChatInterface';
 import { MagicCard } from '@/components/magicui/magic-card';
 import { useTheme } from 'next-themes';
 import { Brain } from 'lucide-react';
-import { ModelSelector } from '@/components/ModelSelector';
-import { DEFAULT_MODEL } from '@/config/modelConfig';
+import { AIML_MODEL_CONFIG, DEFAULT_MODEL } from '@/config/modelConfig';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 interface Event {
   id: string;
@@ -67,7 +73,7 @@ export const Dashboard = () => {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setEvents((data as Event[]) || []);
+      setEvents((data as any[]) || []);
     } catch (error) {
       console.error('Error loading events:', error);
       toast.error('Failed to load events');
@@ -308,10 +314,32 @@ export const Dashboard = () => {
                                 <div className="absolute inset-0 rounded-md bg-gradient-to-r from-primary/5 to-primary/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
                               </div>
                             </div>
-                            <ModelSelector
-                              value={modelId}
-                              onChange={setModelId}
-                            />
+                            <div className="space-y-2">
+                              <Label htmlFor="model-id" className="text-sm font-medium text-foreground">
+                                AI Model for this Assistant
+                              </Label>
+                              <div className="relative group">
+                                <Select value={modelId} onValueChange={setModelId}>
+                                  <SelectTrigger className="h-12 w-full border-border/50 bg-background/50 backdrop-blur-sm transition-all duration-300 focus:border-primary/50 focus:ring-2 focus:ring-primary/20 group-hover:border-primary/30">
+                                    <SelectValue placeholder="Select AI model" />
+                                  </SelectTrigger>
+                                  <SelectContent className="max-h-[400px]">
+                                    {Object.values(AIML_MODEL_CONFIG).map((model) => (
+                                      <SelectItem key={model.shortId} value={model.shortId} className="py-3">
+                                        <div className="flex flex-col gap-1">
+                                          <div className="flex items-center gap-2">
+                                            <span className="font-medium">{model.label}</span>
+                                            <span className="text-xs text-muted-foreground">({model.provider})</span>
+                                          </div>
+                                          <span className="text-xs text-muted-foreground">{model.bestFor}</span>
+                                        </div>
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                                <div className="absolute inset-0 rounded-md bg-gradient-to-r from-primary/5 to-primary/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
+                              </div>
+                            </div>
                           </div>
                           <div className="pt-2">
                             <Button 
