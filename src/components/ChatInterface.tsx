@@ -7,7 +7,17 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import { ArrowLeft, Send, Bot, Trash2 } from 'lucide-react';
+import { ArrowLeft, Send, Bot, Trash2, Settings, Sparkles } from 'lucide-react';
+import { ModelSelector } from '@/components/ModelSelector';
+import { AIML_MODEL_CONFIG, DEFAULT_MODEL } from '@/config/modelConfig';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
 import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar';
 import { AppSidebar } from '@/components/AppSidebar';
 
@@ -33,7 +43,9 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
   const [eventName, setEventName] = useState<string>('');
   const [eventStatus, setEventStatus] = useState<'pending' | 'crawling' | 'completed' | 'failed' | ''>('');
   const [modelId, setModelId] = useState<string | null>(null);
+  const [chatModelId, setChatModelId] = useState<string | null>(null);
   const [hasTriggeredRecrawl, setHasTriggeredRecrawl] = useState(false);
+  const [showModelSelector, setShowModelSelector] = useState(false);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -50,6 +62,36 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, eventId]);
 
+  // Subscribe to event status changes for real-time updates
+  useEffect(() => {
+    if (!eventId) return;
+
+    const channel = supabase
+      .channel(`event-status-${eventId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'events',
+          filter: `id=eq.${eventId}`,
+        },
+        (payload) => {
+          const newStatus = (payload.new as any).status;
+          setEventStatus(newStatus);
+          if (newStatus === 'completed') {
+            // Refresh content when crawling completes
+            console.log('Event crawling completed');
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [eventId]);
+
   useEffect(() => {
     // Auto-scroll to bottom when new messages are added
     if (scrollAreaRef.current) {
@@ -61,7 +103,7 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
     try {
       const { data, error } = await supabase
         .from('events')
-        .select('name, status, model_id, original_url')
+        .select('name, status, model_id, original_url, crawl_data')
         .eq('id', eventId)
         .maybeSingle();
 
@@ -75,31 +117,54 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
       
       setEventName(data.name);
       setEventStatus(data.status as 'pending' | 'crawling' | 'completed' | 'failed');
-      setModelId((data as any).model_id ?? null);
+      const eventModelId = (data as any).model_id ?? null;
+      setModelId(eventModelId);
+      setChatModelId(eventModelId || DEFAULT_MODEL);
 
-      // Auto-trigger a background recrawl once per mount so returning users
-      // always get fresh content without having to manually restart.
-      if (!hasTriggeredRecrawl && (data as any).original_url && (data as any).model_id) {
+      // Only trigger recrawl if:
+      // 1. Event status is 'pending' or 'failed' (needs initial crawl or retry)
+      // 2. Event status is 'completed' but no content exists (crawl may have failed silently)
+      // 3. We haven't already triggered a recrawl in this session
+      const shouldRecrawl = 
+        !hasTriggeredRecrawl && 
+        (data as any).original_url && 
+        (data as any).model_id &&
+        (data.status === 'pending' || 
+         data.status === 'failed' || 
+         (data.status === 'completed' && !(data as any).crawl_data));
+
+      if (shouldRecrawl) {
         setHasTriggeredRecrawl(true);
-        supabase.functions
-          .invoke('crawl-event', {
-            body: {
-              eventId,
-              url: (data as any).original_url,
-              maxDepth: 2,
-              maxPages: 20,
-              includeExternal: true,
-              modelId: (data as any).model_id as string,
-            },
-          })
-          .then(({ error }) => {
-            if (error) {
-              console.error('Background recrawl failed:', error);
-            }
-          })
-          .catch((err) => {
-            console.error('Error invoking background recrawl:', err);
-          });
+        // Check if content already exists before recrawling
+        const { count } = await supabase
+          .from('content_embeddings')
+          .select('*', { count: 'exact', head: true })
+          .eq('event_id', eventId);
+
+        // Only crawl if no content exists or status indicates it's needed
+        if (count === 0 || data.status === 'pending' || data.status === 'failed') {
+          supabase.functions
+            .invoke('crawl-event', {
+              body: {
+                eventId,
+                url: (data as any).original_url,
+                maxDepth: 2,
+                maxPages: 20,
+                includeExternal: true,
+                modelId: (data as any).model_id as string,
+              },
+            })
+            .then(({ error }) => {
+              if (error) {
+                console.error('Background recrawl failed:', error);
+              } else {
+                console.log('Background recrawl started successfully');
+              }
+            })
+            .catch((err) => {
+              console.error('Error invoking background recrawl:', err);
+            });
+        }
       }
       return true;
     } catch (error) {
@@ -264,13 +329,14 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
           : msg
       ));
 
-      // Call chatbot function and display response instantly, using the event's configured model
+      // Call chatbot function and display response instantly, using the selected chat model
+      const effectiveModelId = chatModelId || modelId || DEFAULT_MODEL;
       const { data: response, error: chatError } = await supabase.functions.invoke('chat-with-event', {
         body: {
           sessionId,
           eventId,
           message: content,
-          modelId,
+          modelId: effectiveModelId,
         }
       });
 
@@ -305,20 +371,56 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
               <ArrowLeft className="h-4 w-4" />
               Back
             </Button>
-            <div>
+            <div className="flex-1">
               <h1 className="text-lg font-semibold">Chat with Event Assistant</h1>
               <p className="text-sm text-muted-foreground">{eventName}</p>
+              {chatModelId && AIML_MODEL_CONFIG[chatModelId] && (
+                <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                  <Sparkles className="h-3 w-3" />
+                  Using {AIML_MODEL_CONFIG[chatModelId].label}
+                </p>
+              )}
             </div>
-            {sessionId && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="ml-auto text-destructive hover:text-destructive hover:bg-destructive/10"
-                onClick={deleteChatSession}
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            )}
+            <div className="flex items-center gap-2">
+              <Dialog open={showModelSelector} onOpenChange={setShowModelSelector}>
+                <DialogTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                  >
+                    <Settings className="h-4 w-4" />
+                    Model
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+                  <DialogHeader>
+                    <DialogTitle>Switch AI Model</DialogTitle>
+                    <DialogDescription>
+                      Choose a different AI model for this chat session. This only affects new messages.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <ModelSelector
+                    value={chatModelId || DEFAULT_MODEL}
+                    onChange={(newModelId) => {
+                      setChatModelId(newModelId);
+                      setShowModelSelector(false);
+                      toast.success(`Switched to ${AIML_MODEL_CONFIG[newModelId].label}`);
+                    }}
+                  />
+                </DialogContent>
+              </Dialog>
+              {sessionId && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                  onClick={deleteChatSession}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
           </div>
         </header>
       )}
