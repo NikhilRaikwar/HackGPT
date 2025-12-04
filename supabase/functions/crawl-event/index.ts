@@ -20,15 +20,6 @@ const MODEL_CONFIG = {
     voyage: 'voyage-large-2-instruct',
     retrieval: 'togethercomputer/m2-bert-80M-32k-retrieval',
   },
-  chat: {
-    primary: 'gpt-4o',
-  },
-  reasoning: {
-    primary: 'deepseek/deepseek-r1',
-    fast: 'gpt-4o',
-    longForm: 'claude-3.7-sonnet-20250219',
-    openSource: 'meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo',
-  },
 } as const;
 
 interface CrawlData {
@@ -136,7 +127,15 @@ const createEmbedding = async (text: string): Promise<number[]> => {
     return [];
   }
 
+  if (!text || text.trim().length === 0) {
+    console.warn('Empty text provided for embedding');
+    return [];
+  }
+
   try {
+    // Truncate text to reasonable length for embedding (8k chars)
+    const truncatedText = text.substring(0, 8000);
+    
     const response = await fetch('https://api.aimlapi.com/v1/embeddings', {
       method: 'POST',
       headers: {
@@ -145,16 +144,32 @@ const createEmbedding = async (text: string): Promise<number[]> => {
       },
       body: JSON.stringify({
         model: MODEL_CONFIG.embeddings.primary,
-        input: text.substring(0, 8000), // Limit to 8k chars
+        input: truncatedText,
       }),
     });
 
     if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`AIML API error: ${response.status} - ${errorText}`);
       throw new Error(`AIML API error: ${response.status}`);
     }
 
     const data = await response.json();
-    return data.data[0].embedding;
+    
+    if (!data.data || !data.data[0] || !data.data[0].embedding) {
+      console.error('Invalid embedding response structure:', data);
+      return [];
+    }
+
+    const embedding = data.data[0].embedding;
+    
+    // Validate embedding dimensions (should be 1536 for text-embedding-3-large)
+    if (!Array.isArray(embedding) || embedding.length === 0) {
+      console.error('Invalid embedding format');
+      return [];
+    }
+
+    return embedding;
   } catch (error) {
     console.error('Error creating embedding:', error);
     return [];
@@ -186,6 +201,7 @@ interface CrawlConfig {
   maxDepth: number;
   maxPages: number;
   includeExternal: boolean;
+  modelId?: string;
 }
 
 const crawlSite = async (
@@ -228,24 +244,89 @@ const crawlSite = async (
 
       const chunks = chunkText(crawlData.content);
 
-      const embeddingPromises = chunks.map(async (chunk, index) => {
-        const embedding = await createEmbedding(chunk);
+      if (chunks.length === 0) {
+        console.warn(`No chunks extracted from URL: ${current.url}`);
+        continue;
+      }
 
-        return supabase
-          .from('content_embeddings')
-          .insert({
-            event_id: eventId,
-            url_id: urlData.id,
-            content_chunk: chunk,
-            embedding: embedding.length > 0 ? embedding : null,
-            metadata: {
-              chunk_index: index,
-              chunk_length: chunk.length,
-            },
-          });
-      });
+      // Process embeddings in batches to avoid overwhelming the API
+      const batchSize = 5;
+      let successfulInserts = 0;
+      let failedInserts = 0;
+      
+      for (let i = 0; i < chunks.length; i += batchSize) {
+        const batch = chunks.slice(i, i + batchSize);
+        
+        const embeddingPromises = batch.map(async (chunk, batchIndex) => {
+          const globalIndex = i + batchIndex;
+          
+          // Skip very short chunks
+          if (chunk.trim().length < 50) {
+            console.log(`Skipping chunk ${globalIndex}: too short (${chunk.length} chars)`);
+            return { success: false, reason: 'too_short' };
+          }
 
-      await Promise.all(embeddingPromises);
+          try {
+            const embedding = await createEmbedding(chunk);
+            
+            // Always insert the chunk, even if embedding failed (for fallback search)
+            const insertData: any = {
+              event_id: eventId,
+              url_id: urlData.id,
+              content_chunk: chunk,
+              metadata: {
+                chunk_index: globalIndex,
+                chunk_length: chunk.length,
+                url: current.url,
+              },
+            };
+
+            // Only add embedding if we got a valid one
+            if (embedding && embedding.length > 0) {
+              insertData.embedding = embedding;
+            } else {
+              console.warn(`No embedding created for chunk ${globalIndex}, inserting without embedding`);
+            }
+
+            const { data, error } = await supabase
+              .from('content_embeddings')
+              .insert(insertData)
+              .select('id')
+              .single();
+
+            if (error) {
+              console.error(`Failed to insert chunk ${globalIndex}:`, error);
+              return { success: false, error };
+            }
+
+            return { success: true, id: data?.id };
+          } catch (err) {
+            console.error(`Error processing chunk ${globalIndex}:`, err);
+            return { success: false, error: err };
+          }
+        });
+
+        const results = await Promise.all(embeddingPromises);
+        
+        // Count successes and failures
+        results.forEach(result => {
+          if (result.success) {
+            successfulInserts++;
+          } else {
+            failedInserts++;
+            if ((result as any).error) {
+              console.error('Insert error:', (result as any).error);
+            }
+          }
+        });
+
+        // Log batch progress
+        if (failedInserts > 0) {
+          console.warn(`Batch ${i}-${i + batch.length}: ${successfulInserts} succeeded, ${failedInserts} failed`);
+        }
+      }
+
+      console.log(`Processed ${chunks.length} chunks: ${successfulInserts} inserted successfully, ${failedInserts} failed`);
 
       totalChunks += chunks.length;
       totalWords += crawlData.metadata.word_count;
@@ -339,17 +420,39 @@ serve(async (req) => {
 
       const result = await crawlSite(eventId, url, crawlConfig);
 
-      // Update event with crawl data and mark as completed
+      // Verify that we actually have content before marking as completed
+      const { count: embeddingCount, error: countError } = await supabase
+        .from('content_embeddings')
+        .select('*', { count: 'exact', head: true })
+        .eq('event_id', eventId);
+
+      if (countError) {
+        console.error('Error counting embeddings:', countError);
+      }
+
+      const finalStatus = embeddingCount && embeddingCount > 0 ? 'completed' : 'failed';
+      
+      if (finalStatus === 'failed') {
+        console.error(`Crawl failed: No embeddings created for event ${eventId}. Total chunks processed: ${result.totalChunks}`);
+      } else {
+        console.log(`Crawl succeeded: ${embeddingCount} embeddings created for event ${eventId}`);
+      }
+      
+      // Update event with crawl data and mark as completed or failed
       await supabase
         .from('events')
         .update({
-          status: 'completed',
+          status: finalStatus,
           crawl_data: {
             total_chunks: result.totalChunks,
             total_words: result.totalWords,
             crawled_at: new Date().toISOString(),
             urls_processed: result.urlsProcessed,
+            embedding_count: embeddingCount || 0,
             config: crawlConfig,
+            ...(finalStatus === 'failed' ? { 
+              error: 'No content embeddings were created during crawl' 
+            } : {})
           }
         })
         .eq('id', eventId);

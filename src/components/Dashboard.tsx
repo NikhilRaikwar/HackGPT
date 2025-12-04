@@ -22,6 +22,8 @@ import { ChatInterface } from './ChatInterface';
 import { MagicCard } from '@/components/magicui/magic-card';
 import { useTheme } from 'next-themes';
 import { Brain } from 'lucide-react';
+import { ModelSelector } from '@/components/ModelSelector';
+import { DEFAULT_MODEL } from '@/config/modelConfig';
 
 interface Event {
   id: string;
@@ -44,7 +46,7 @@ export const Dashboard = () => {
   const [submitting, setSubmitting] = useState(false);
   const [eventName, setEventName] = useState("");
   const [eventUrl, setEventUrl] = useState("");
-  const [modelId, setModelId] = useState<string>('gpt-4o');
+  const [modelId, setModelId] = useState<string>(DEFAULT_MODEL);
 
   const getUserDisplayName = () => {
     return user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email || 'User';
@@ -136,7 +138,7 @@ export const Dashboard = () => {
         // Clear the form
         setEventName("");
         setEventUrl("");
-        setModelId('gpt-4o');
+        setModelId(DEFAULT_MODEL);
 
         // Automatically open the chat for the new event
         setSelectedEventId(data.id);
@@ -219,13 +221,32 @@ export const Dashboard = () => {
           ) : (
             <>
               {/* Welcome Message */}
-              <div className="text-center py-8">
-                <h1 className="text-3xl font-bold text-foreground mb-2">
+              <div className="text-center py-8 space-y-4">
+                <div className="flex items-center justify-center gap-3 mb-4">
+                  <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center shadow-lg">
+                    <Brain className="w-8 h-8 text-primary-foreground" />
+                  </div>
+                </div>
+                <h1 className="text-4xl font-bold bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent mb-2">
                   Welcome, {getUserDisplayName()}!
                 </h1>
-                <p className="text-muted-foreground">
-                  Chat with HackGPT about your hackathons and events
+                <p className="text-muted-foreground text-lg max-w-2xl mx-auto">
+                  Transform any hackathon into an intelligent AI assistant. Ask questions, get instant answers about rules, prizes, timelines, and more.
                 </p>
+                <div className="flex items-center justify-center gap-6 pt-4 text-sm text-muted-foreground">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                    <span>10+ AI Models</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                    <span>Smart RAG Pipeline</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-purple-500 animate-pulse" />
+                    <span>Real-time Crawling</span>
+                  </div>
+                </div>
               </div>
 
               {/* Event URL Form */}
@@ -287,25 +308,10 @@ export const Dashboard = () => {
                                 <div className="absolute inset-0 rounded-md bg-gradient-to-r from-primary/5 to-primary/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
                               </div>
                             </div>
-                            <div className="space-y-2">
-                              <Label htmlFor="model-id" className="text-sm font-medium text-foreground">
-                                Model for this assistant
-                              </Label>
-                              <div className="relative group">
-                                <select
-                                  id="model-id"
-                                  value={modelId}
-                                  onChange={(e) => setModelId(e.target.value)}
-                                  className="h-12 w-full px-4 border border-border/50 bg-background/50 backdrop-blur-sm rounded-md text-sm focus:outline-none focus:border-primary/50 focus:ring-2 focus:ring-primary/20 group-hover:border-primary/30"
-                                >
-                                  <option value="deepseek-r1">DeepSeek R1 – complex reasoning</option>
-                                  <option value="gpt-4o">GPT-4o – fast, balanced (chat + vision)</option>
-                                  <option value="claude-sonnet">Claude 3.7 Sonnet – long-form analysis</option>
-                                  <option value="llama-405b">Llama 3.1 405B – open-source reasoning</option>
-                                </select>
-                                <div className="absolute inset-0 rounded-md bg-gradient-to-r from-primary/5 to-primary/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
-                              </div>
-                            </div>
+                            <ModelSelector
+                              value={modelId}
+                              onChange={setModelId}
+                            />
                           </div>
                           <div className="pt-2">
                             <Button 
