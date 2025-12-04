@@ -115,9 +115,10 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
         return false;
       }
       
-      setEventName(data.name);
-      setEventStatus(data.status as 'pending' | 'crawling' | 'completed' | 'failed');
-      const eventModelId = (data as any).model_id ?? null;
+      const eventData = data as any;
+      setEventName(eventData.name);
+      setEventStatus(eventData.status as 'pending' | 'crawling' | 'completed' | 'failed');
+      const eventModelId = eventData.model_id ?? null;
       setModelId(eventModelId);
       setChatModelId(eventModelId || DEFAULT_MODEL);
 
@@ -127,11 +128,11 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
       // 3. We haven't already triggered a recrawl in this session
       const shouldRecrawl = 
         !hasTriggeredRecrawl && 
-        (data as any).original_url && 
-        (data as any).model_id &&
-        (data.status === 'pending' || 
-         data.status === 'failed' || 
-         (data.status === 'completed' && !(data as any).crawl_data));
+        eventData.original_url && 
+        eventData.model_id &&
+        (eventData.status === 'pending' || 
+         eventData.status === 'failed' || 
+         (eventData.status === 'completed' && !eventData.crawl_data));
 
       if (shouldRecrawl) {
         setHasTriggeredRecrawl(true);
@@ -142,16 +143,16 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
           .eq('event_id', eventId);
 
         // Only crawl if no content exists or status indicates it's needed
-        if (count === 0 || data.status === 'pending' || data.status === 'failed') {
+        if (count === 0 || eventData.status === 'pending' || eventData.status === 'failed') {
           supabase.functions
             .invoke('crawl-event', {
               body: {
                 eventId,
-                url: (data as any).original_url,
+                url: eventData.original_url,
                 maxDepth: 2,
                 maxPages: 20,
                 includeExternal: true,
-                modelId: (data as any).model_id as string,
+                modelId: eventData.model_id as string,
               },
             })
             .then(({ error }) => {
@@ -192,6 +193,10 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
       toast.success('Chat deleted successfully');
       setMessages([]);
       setSessionId(null);
+      // Refresh sidebar by calling onEventSelect with empty string
+      if (onEventSelect) {
+        onEventSelect('');
+      }
       onBack();
     } catch (error) {
       console.error('Error deleting chat session:', error);
@@ -259,6 +264,15 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
 
       setSessionId(currentSessionId);
 
+      // Update session title if it's the default
+      if (existingSessions && existingSessions.length === 0) {
+        // New session created - update title with event name
+        await supabase
+          .from('chat_sessions')
+          .update({ title: `Chat about ${eventName || 'Event'}` })
+          .eq('id', currentSessionId);
+      }
+
       // Load existing messages
       const { data: existingMessages, error: messagesError } = await supabase
         .from('chat_messages')
@@ -268,6 +282,11 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
 
       if (messagesError) throw messagesError;
       setMessages((existingMessages as Message[]) || []);
+      
+      // Refresh sidebar chat history
+      if ((window as any).refreshChatHistory) {
+        (window as any).refreshChatHistory();
+      }
 
     } catch (error) {
       console.error('Error initializing chat:', error);
