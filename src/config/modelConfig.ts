@@ -133,6 +133,18 @@ export const AIML_MODEL_CONFIG: Record<string, ModelInfo> = {
     cost: 'medium',
     category: 'reasoning',
   },
+  'sonar': {
+    id: "perplexity/sonar",
+    shortId: "sonar",
+    label: "Perplexity Sonar",
+    provider: "Perplexity",
+    contextTokens: 128_000,
+    tier: 2,
+    bestFor: "Web search, crawling, fact-checking, topic summaries, real-time information",
+    speed: 'fast',
+    cost: 'low',
+    category: 'chat',
+  },
 };
 
 export const MODEL_CATEGORIES = {
