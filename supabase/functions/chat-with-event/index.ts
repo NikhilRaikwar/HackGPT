@@ -193,6 +193,8 @@ const MODEL_MAP: Record<string, string> = {
   // Other models
   'gemini-pro': 'google/gemini-pro-1.5',
   'mistral-large': 'mistralai/mistral-large-2407',
+  // Perplexity models
+  'sonar': 'perplexity/sonar',
 };
 
 const resolveChatModel = (requestedModelId?: string): string => {
