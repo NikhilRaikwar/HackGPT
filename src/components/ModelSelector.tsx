@@ -13,49 +13,31 @@ interface ModelSelectorProps {
 export const ModelSelector = ({ value, onChange, className }: ModelSelectorProps) => {
   const selectedModel = AIML_MODEL_CONFIG[value] || AIML_MODEL_CONFIG[DEFAULT_MODEL];
 
-  const getSpeedColor = (speed: string) => {
-    switch (speed) {
-      case 'fast': return 'bg-green-500/20 text-green-600 dark:text-green-400';
-      case 'medium': return 'bg-yellow-500/20 text-yellow-600 dark:text-yellow-400';
-      case 'slow': return 'bg-red-500/20 text-red-600 dark:text-red-400';
-      default: return 'bg-gray-500/20 text-gray-600 dark:text-gray-400';
-    }
-  };
-
-  const getCostColor = (cost: string) => {
-    switch (cost) {
-      case 'low': return 'bg-green-500/20 text-green-600 dark:text-green-400';
-      case 'medium': return 'bg-yellow-500/20 text-yellow-600 dark:text-yellow-400';
-      case 'high': return 'bg-red-500/20 text-red-600 dark:text-red-400';
-      default: return 'bg-gray-500/20 text-gray-600 dark:text-gray-400';
-    }
-  };
-
   return (
     <div className={cn("space-y-4", className)}>
       <div>
         <label className="text-sm font-medium text-foreground mb-3 block">
           Select AI Model for this Assistant
         </label>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {Object.values(AIML_MODEL_CONFIG).map((model) => {
-            const isSelected = value === model.shortId;
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          {Object.entries(AIML_MODEL_CONFIG).map(([key, model]) => {
+            const isSelected = value === key;
             return (
               <Card
-                key={model.shortId}
+                key={key}
                 className={cn(
                   "cursor-pointer transition-all duration-200 hover:shadow-md border-2",
                   isSelected
                     ? "border-primary bg-primary/5 shadow-md"
                     : "border-border/50 hover:border-primary/50"
                 )}
-                onClick={() => onChange(model.shortId)}
+                onClick={() => onChange(key)}
               >
                 <CardHeader className="pb-3">
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
                       <CardTitle className="text-base font-semibold flex items-center gap-2">
-                        {model.label}
+                        {model.name}
                         {isSelected && (
                           <Check className="h-4 w-4 text-primary" />
                         )}
@@ -68,27 +50,24 @@ export const ModelSelector = ({ value, onChange, className }: ModelSelectorProps
                 </CardHeader>
                 <CardContent className="pt-0 space-y-2">
                   <p className="text-xs text-muted-foreground line-clamp-2">
-                    {model.bestFor}
+                    {model.description}
                   </p>
                   <div className="flex flex-wrap gap-2">
-                    <Badge
-                      variant="outline"
-                      className={cn("text-xs", getSpeedColor(model.speed))}
-                    >
-                      <Zap className="h-3 w-3 mr-1" />
-                      {model.speed}
-                    </Badge>
-                    <Badge
-                      variant="outline"
-                      className={cn("text-xs", getCostColor(model.cost))}
-                    >
-                      <DollarSign className="h-3 w-3 mr-1" />
-                      {model.cost}
-                    </Badge>
                     <Badge variant="outline" className="text-xs">
                       <Clock className="h-3 w-3 mr-1" />
-                      {(model.contextTokens / 1000).toFixed(0)}k context
+                      {(model.contextWindow || 128000 / 1000).toFixed(0)}k context
                     </Badge>
+                    {model.capabilities?.includes('function-calling') && (
+                      <Badge variant="outline" className="text-xs bg-blue-500/20 text-blue-600 dark:text-blue-400">
+                        <Zap className="h-3 w-3 mr-1" />
+                        Functions
+                      </Badge>
+                    )}
+                    {model.capabilities?.includes('vision') && (
+                      <Badge variant="outline" className="text-xs bg-purple-500/20 text-purple-600 dark:text-purple-400">
+                        Vision
+                      </Badge>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -100,7 +79,7 @@ export const ModelSelector = ({ value, onChange, className }: ModelSelectorProps
         <Card className="bg-muted/50 border-primary/20">
           <CardContent className="pt-4">
             <p className="text-sm text-muted-foreground">
-              <span className="font-medium text-foreground">Selected:</span> {selectedModel.label} - {selectedModel.bestFor}
+              <span className="font-medium text-foreground">Selected:</span> {selectedModel.name} - {selectedModel.description}
             </p>
           </CardContent>
         </Card>
