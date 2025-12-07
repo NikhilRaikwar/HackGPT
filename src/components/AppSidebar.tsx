@@ -154,7 +154,7 @@ export function AppSidebar({
     }
   };
 
-  const handleDeleteChatSession = async (sessionId: string, sessionTitle: string) => {
+  const handleDeleteChatSession = async (sessionId: string, sessionTitle: string, eventId: string) => {
     try {
       const { error } = await supabase
         .from('chat_sessions')
@@ -165,6 +165,12 @@ export function AppSidebar({
       
       toast.success(`Deleted chat "${sessionTitle}" successfully`);
       loadChatSessions();
+
+      // If the deleted chat belonged to the currently open event,
+      // clear the selection so the main view returns to the event form/home.
+      if (onEventSelect && selectedEventId && selectedEventId === eventId) {
+        onEventSelect('');
+      }
     } catch (error) {
       console.error('Error deleting chat session:', error);
       toast.error('Failed to delete chat');
@@ -253,7 +259,7 @@ export function AppSidebar({
                             <AlertDialogFooter>
                               <AlertDialogCancel>Cancel</AlertDialogCancel>
                               <AlertDialogAction 
-                                onClick={() => handleDeleteChatSession(session.id, displayName)}
+                                onClick={() => handleDeleteChatSession(session.id, displayName, session.event_id)}
                                 className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                               >
                                 Delete
