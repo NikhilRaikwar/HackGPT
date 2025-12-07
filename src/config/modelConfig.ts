@@ -149,7 +149,7 @@ export const AIML_MODEL_CONFIG: Record<string, ModelInfo> = {
 
 export const MODEL_CATEGORIES = {
   reasoning: ['deepseek-r1', 'claude-opus', 'mistral-large'],
-  chat: ['gpt-4o', 'claude-sonnet'],
+  chat: ['gpt-4o', 'claude-sonnet', 'sonar'],
   fast: ['gpt-4o-mini', 'claude-haiku', 'llama-70b'],
   'long-form': ['claude-sonnet', 'gemini-pro'],
   'open-source': ['llama-405b', 'llama-70b'],
