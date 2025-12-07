@@ -16,6 +16,8 @@ const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
 const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 // @ts-ignore - Deno environment variable
 const aimlApiKey = Deno.env.get('AIMLAPI_KEY');
+// @ts-ignore - Deno environment variable
+const openaiApiKey = Deno.env.get('OPENAI_API_KEY');
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
@@ -39,29 +41,56 @@ const MODEL_CONFIG = {
 } as const;
 
 const createEmbedding = async (text: string): Promise<number[]> => {
-  if (!aimlApiKey) {
-    throw new Error('AIML API key not configured');
-  }
-
   try {
-    const response = await fetch('https://api.aimlapi.com/v1/embeddings', {
+    // Prefer AIML embeddings when key is configured
+    if (aimlApiKey) {
+      try {
+        const response = await fetch('https://api.aimlapi.com/v1/embeddings', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${aimlApiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: MODEL_CONFIG.embeddings.primary,
+            input: text,
+          }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          return data.data[0].embedding;
+        }
+
+        console.warn('AIML embedding request failed, falling back to OpenAI:', response.status, await response.text());
+      } catch (aimlError) {
+        console.warn('AIML embedding request threw, falling back to OpenAI:', aimlError);
+      }
+    }
+
+    if (!openaiApiKey) {
+      throw new Error('No embedding provider configured: both AIMLAPI_KEY and OPENAI_API_KEY are missing or invalid');
+    }
+
+    const openaiResponse = await fetch('https://api.openai.com/v1/embeddings', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${aimlApiKey}`,
+        'Authorization': `Bearer ${openaiApiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: MODEL_CONFIG.embeddings.primary,
+        model: 'text-embedding-3-large',
         input: text,
       }),
     });
 
-    if (!response.ok) {
-      throw new Error(`AIML API error: ${response.status}`);
+    if (!openaiResponse.ok) {
+      const errorText = await openaiResponse.text();
+      throw new Error(`Failed to create embedding with OpenAI: ${errorText}`);
     }
 
-    const data = await response.json();
-    return data.data[0].embedding;
+    const openaiData = await openaiResponse.json();
+    return openaiData.data[0].embedding;
   } catch (error) {
     console.error('Error creating embedding:', error);
     throw error;
@@ -267,11 +296,8 @@ const TOOLS = [
 ];
 
 const generateResponse = async (context: string[], userMessage: string, modelId?: string): Promise<string> => {
-  if (!aimlApiKey) {
-    throw new Error('AIML API key not configured');
-  }
-
   const contextText = context.join('\n\n');
+  
   const systemPrompt = `You are an AI assistant specialized in answering questions about events, hackathons, and competitions. 
 
 You have access to the following information about this specific event:
@@ -291,36 +317,72 @@ Be conversational but informative. Focus on providing practical and actionable i
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userMessage },
       ],
-      // Slightly lower temperature for clearer, more factual answers
       temperature: 0.5,
       max_tokens: 900,
-      // Enable function calling
       tools: TOOLS,
-      tool_choice: "auto"
+      tool_choice: "auto",
     };
 
-    const response = await fetch('https://api.aimlapi.com/v1/chat/completions', {
+    // Primary: AIML API if configured
+    if (aimlApiKey) {
+      try {
+        const response = await fetch('https://api.aimlapi.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${aimlApiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(baseBody),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          const choice = data.choices[0];
+          
+          if (choice.message.tool_calls) {
+            return await handleToolCalls(choice.message.tool_calls, context);
+          }
+          
+          return choice.message.content;
+        }
+
+        console.warn('AIML chat request failed, falling back to OpenAI:', response.status, await response.text());
+      } catch (aimlError) {
+        console.warn('AIML chat request threw, falling back to OpenAI:', aimlError);
+      }
+    }
+
+    // Fallback: OpenAI chat completions (use gpt-4o regardless of selected model)
+    if (!openaiApiKey) {
+      throw new Error('No chat provider configured: both AIMLAPI_KEY and OPENAI_API_KEY are missing or invalid');
+    }
+
+    const openaiBody = {
+      model: 'gpt-4o',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userMessage },
+      ],
+      temperature: 0.5,
+      max_tokens: 900,
+    };
+
+    const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${aimlApiKey}`,
+        'Authorization': `Bearer ${openaiApiKey}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(baseBody),
+      body: JSON.stringify(openaiBody),
     });
 
-    if (!response.ok) {
-      throw new Error(`AIML API error: ${response.status}`);
+    if (!openaiResponse.ok) {
+      const errorText = await openaiResponse.text();
+      throw new Error(`OpenAI chat API error: ${errorText}`);
     }
 
-    const data = await response.json();
-    const choice = data.choices[0];
-    
-    // Handle function calling
-    if (choice.message.tool_calls) {
-      return await handleToolCalls(choice.message.tool_calls, context);
-    }
-    
-    return choice.message.content;
+    const openaiData = await openaiResponse.json();
+    return openaiData.choices[0].message.content;
   } catch (error) {
     console.error('Error generating tool response:', error);
     return `I found some information but encountered an error while processing it: ${(error as Error).message}`;
@@ -378,20 +440,57 @@ const handleToolCalls = async (toolCalls: any[], context: string[]): Promise<str
   
   // Generate final response based on tool results
   const resultsText = toolResults.map(r => r.output).join('\n\n');
-  
-  if (!aimlApiKey) {
-    throw new Error('AIML API key not configured');
-  }
-  
+
   try {
-    const response = await fetch('https://api.aimlapi.com/v1/chat/completions', {
+    // Prefer AIML for tool-result summarization
+    if (aimlApiKey) {
+      try {
+        const response = await fetch('https://api.aimlapi.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${aimlApiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: 'x-ai/grok-4-fast-reasoning',
+            messages: [
+              { 
+                role: 'system', 
+                content: 'You are an AI assistant. Based on the tool results provided, give a comprehensive and helpful answer to the user.' 
+              },
+              { 
+                role: 'user', 
+                content: `Based on these tool results, please provide a complete answer:\n\n${resultsText}` 
+              }
+            ],
+            temperature: 0.5,
+            max_tokens: 900,
+          }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          return data.choices[0].message.content;
+        }
+
+        console.warn('AIML tool summarization failed, falling back to OpenAI:', response.status, await response.text());
+      } catch (aimlError) {
+        console.warn('AIML tool summarization threw, falling back to OpenAI:', aimlError);
+      }
+    }
+
+    if (!openaiApiKey) {
+      throw new Error('No chat provider configured: both AIMLAPI_KEY and OPENAI_API_KEY are missing or invalid');
+    }
+
+    const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${aimlApiKey}`,
+        'Authorization': `Bearer ${openaiApiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'x-ai/grok-4-fast-reasoning',
+        model: 'gpt-4o',
         messages: [
           { 
             role: 'system', 
@@ -406,13 +505,14 @@ const handleToolCalls = async (toolCalls: any[], context: string[]): Promise<str
         max_tokens: 900,
       }),
     });
-    
-    if (!response.ok) {
-      throw new Error(`AIML API error: ${response.status}`);
+
+    if (!openaiResponse.ok) {
+      const errorText = await openaiResponse.text();
+      throw new Error(`OpenAI chat API error: ${errorText}`);
     }
-    
-    const data = await response.json();
-    return data.choices[0].message.content;
+
+    const openaiData = await openaiResponse.json();
+    return openaiData.choices[0].message.content;
   } catch (error) {
     console.error('Error generating tool response:', error);
     return `I found some information but encountered an error while processing it: ${(error as Error).message}`;

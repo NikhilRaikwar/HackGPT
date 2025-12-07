@@ -214,46 +214,94 @@ const extractLinks = (html: string, baseUrl: string): { internal: string[]; exte
 const crawlUrl = async (url: string): Promise<CrawlData> => {
   try {
     console.log(`Crawling URL: ${url}`);
-    
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; HackathonBot/1.0; +https://hackgpt.ai)',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Accept-Encoding': 'gzip, deflate',
-        'DNT': '1',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-      },
-    });
 
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
+    // First try direct fetch as it's usually fastest and most reliable
+    try {
+      const directResponse = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+        },
+      });
 
-    const html = await response.text();
-    const content = extractTextFromHtml(html);
-    const hackathonInfo = extractHackathonInfo(html, content);
-    const links = extractLinks(html, url);
-    
-    // Extract title with fallback to hackathon info
-    const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
-    const title = hackathonInfo.title || (titleMatch ? titleMatch[1].trim() : new URL(url).hostname);
-
-    return {
-      title,
-      content,
-      html,
-      links,
-      metadata: {
-        url,
-        crawled_at: new Date().toISOString(),
-        word_count: content.split(/\s+/).length,
-        internal_links: links.internal.length,
-        external_links: links.external.length,
-        hackathon_info: hackathonInfo,
+      if (!directResponse.ok) {
+        throw new Error(`Failed to fetch ${url}: ${directResponse.status} ${directResponse.statusText}`);
       }
-    };
+
+      const html = await directResponse.text();
+      const text = extractTextFromHtml(html);
+      const hackathonInfo = extractHackathonInfo(html, text);
+      const links = extractLinks(html, url);
+
+      return {
+        title: hackathonInfo.title || new URL(url).hostname,
+        content: text,
+        html,
+        links,
+        metadata: {
+          url,
+          crawled_at: new Date().toISOString(),
+          word_count: text.split(/\s+/).length,
+          internal_links: links.internal.length,
+          external_links: links.external.length,
+          hackathon_info: hackathonInfo,
+        },
+      };
+    } catch (directError) {
+      console.warn('Direct fetch failed, trying AIML crawl API:', directError);
+
+      // Fallback to AIML crawl API if configured
+      if (!aimlApiKey) {
+        throw directError;
+      }
+
+      const response = await fetch('https://api.aimlapi.com/crawl', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${aimlApiKey}`,
+        },
+        body: JSON.stringify({
+          url,
+          wait_for: 2000,
+          extract: ['title', 'text', 'links', 'metadata'],
+          options: {
+            user_agent: 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+            block_ads: true,
+            block_trackers: true,
+            remove_duplicates: true,
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`AIML crawl API failed with status ${response.status}`);
+      }
+
+      const result = await response.json();
+
+      const text = result.text || '';
+      const title = result.title || new URL(url).hostname;
+      const links = result.links || { internal: [], external: [] };
+      const hackathonInfo = result.html ? extractHackathonInfo(result.html, text) : {};
+
+      return {
+        title,
+        content: text,
+        html: result.html || '',
+        links: {
+          internal: Array.isArray(links.internal) ? links.internal : [],
+          external: Array.isArray(links.external) ? links.external : [],
+        },
+        metadata: {
+          url,
+          crawled_at: new Date().toISOString(),
+          word_count: text.split(/\s+/).length,
+          internal_links: Array.isArray(links.internal) ? links.internal.length : 0,
+          external_links: Array.isArray(links.external) ? links.external.length : 0,
+          hackathon_info: { ...hackathonInfo, ...(result.metadata || {}) },
+        },
+      };
+    }
   } catch (error) {
     console.error(`Error crawling ${url}:`, error);
     throw error;
@@ -261,100 +309,65 @@ const crawlUrl = async (url: string): Promise<CrawlData> => {
 };
 
 const createEmbedding = async (text: string): Promise<number[]> => {
-  if (!aimlApiKey) {
-    console.warn('AIML API key not found, skipping embedding generation');
-    return [];
-  }
-
-  if (!text || text.trim().length === 0) {
-    console.warn('Empty text provided for embedding');
-    return [];
-  }
-
   try {
-    // Truncate text to reasonable length for embedding (8k chars)
-    const truncatedText = text.substring(0, 8000);
-    
-    const response = await fetch('https://api.aimlapi.com/v1/embeddings', {
+    // Prefer AIML embeddings if key is configured
+    if (aimlApiKey) {
+      try {
+        const response = await fetch('https://api.aimlapi.com/embeddings', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${aimlApiKey}`,
+          },
+          body: JSON.stringify({
+            model: MODEL_CONFIG.embeddings.primary,
+            input: text,
+            options: {
+              normalize: true,
+              truncate: true,
+            },
+          }),
+        });
+
+        if (response.ok) {
+          const result = await response.json();
+          return result.data[0].embedding;
+        }
+
+        console.warn('AIML embedding request failed, falling back to OpenAI:', response.status, await response.text());
+      } catch (aimlError) {
+        console.warn('AIML embedding request threw, falling back to OpenAI:', aimlError);
+      }
+    }
+
+    const openaiKey = Deno.env.get('OPENAI_API_KEY');
+    if (!openaiKey) {
+      throw new Error('No embedding provider configured: both AIMLAPI_KEY and OPENAI_API_KEY are missing or invalid');
+    }
+
+    const openaiResponse = await fetch('https://api.openai.com/v1/embeddings', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${aimlApiKey}`,
         'Content-Type': 'application/json',
+        'Authorization': `Bearer ${openaiKey}`,
       },
       body: JSON.stringify({
-        model: MODEL_CONFIG.embeddings.primary,
-        input: truncatedText,
+        model: 'text-embedding-3-large',
+        input: text,
       }),
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`AIML API error: ${response.status} - ${errorText}`);
-      throw new Error(`AIML API error: ${response.status}`);
+    if (!openaiResponse.ok) {
+      const error = await openaiResponse.text();
+      throw new Error(`Failed to create embedding with OpenAI: ${error}`);
     }
 
-    const data = await response.json();
-    
-    if (!data.data || !data.data[0] || !data.data[0].embedding) {
-      console.error('Invalid embedding response structure:', data);
-      return [];
-    }
-
-    const embedding = data.data[0].embedding;
-    
-    // Validate embedding dimensions (should be 1536 for text-embedding-3-large)
-    if (!Array.isArray(embedding) || embedding.length === 0) {
-      console.error('Invalid embedding format');
-      return [];
-    }
-
-    return embedding;
+    const { data } = await openaiResponse.json();
+    return data[0].embedding;
   } catch (error) {
     console.error('Error creating embedding:', error);
-    return [];
+    throw error;
   }
-};
-
-const chunkText = (text: string, maxChunkSize = 1500): string[] => {
-  // First, try to preserve semantic structure
-  const sections = text.split(/\n\n+/); // Split by double newlines (paragraphs)
-  const chunks: string[] = [];
-  
-  for (const section of sections) {
-    const trimmedSection = section.trim();
-    if (trimmedSection.length < 50) continue; // Skip very short sections
-    
-    // If section is small enough, keep it whole
-    if (trimmedSection.length <= maxChunkSize) {
-      chunks.push(trimmedSection);
-      continue;
-    }
-    
-    // For larger sections, try to split by sentences while preserving context
-    const sentences = trimmedSection.split(/[.!?]+/).filter(s => s.trim().length > 0);
-    let currentChunk = '';
-    
-    for (const sentence of sentences) {
-      const testChunk = currentChunk + (currentChunk ? '. ' : '') + sentence;
-      
-      if (testChunk.length > maxChunkSize && currentChunk) {
-        chunks.push(currentChunk.trim());
-        currentChunk = sentence;
-      } else {
-        currentChunk = testChunk;
-      }
-    }
-    
-    if (currentChunk.trim()) {
-      chunks.push(currentChunk.trim());
-    }
-  }
-  
-  // Filter chunks and ensure minimum quality
-  return chunks.filter(chunk => {
-    const trimmed = chunk.trim();
-    return trimmed.length >= 50 && trimmed.length <= 2000; // Reasonable chunk sizes
-  });
 };
 
 interface CrawlConfig {
@@ -370,97 +383,68 @@ const crawlSite = async (
   config: CrawlConfig,
 ) => {
   const visited = new Set<string>();
-  const queue: { url: string; depth: number }[] = [{ url: rootUrl, depth: 0 }];
-  let totalChunks = 0;
-  let totalWords = 0;
-  let urlsProcessed = 0;
+  const queue: { url: string; depth: number }[] = [
+    { url: rootUrl, depth: 0 },
+  ];
+  const results: CrawlData[] = [];
+  let processedPages = 0;
+  const BATCH_SIZE = 5; // Process multiple pages in parallel
+  const EMBEDDING_BATCH_SIZE = 10; // Batch size for embedding creation
 
-  while (queue.length > 0 && urlsProcessed < config.maxPages) {
-    const current = queue.shift()!;
-    if (visited.has(current.url)) {
-      continue;
-    }
-    visited.add(current.url);
+  try {
+    // Update event status to 'crawling' with initial data
+    await supabase
+      .from('events')
+      .update({ 
+        status: 'crawling',
+        crawl_data: {
+          started_at: new Date().toISOString(),
+          status: 'crawling',
+          processed: 0,
+          total: 1, // Will be updated as we discover more pages
+        }
+      })
+      .eq('id', eventId);
 
-    try {
-      const crawlData = await crawlUrl(current.url);
-
-      const { data: urlData, error: urlError } = await supabase
-        .from('event_urls')
-        .insert({
-          event_id: eventId,
-          url: current.url,
-          title: crawlData.title,
-          content: crawlData.content,
-          metadata: {
-            ...crawlData.metadata,
-            hackathon_info: crawlData.metadata.hackathon_info || {}
-          },
-          crawl_status: 'completed',
-        })
-        .select()
-        .single();
-
-      if (urlError) {
-        throw urlError;
-      }
-
-      const chunks = chunkText(crawlData.content);
-
-      if (chunks.length === 0) {
-        console.warn(`No chunks extracted from URL: ${current.url}`);
-        continue;
-      }
-
-      // Process embeddings in batches to avoid overwhelming the API
-      const batchSize = 5;
-      let successfulInserts = 0;
-      let failedInserts = 0;
+    // Process queue in batches for better performance
+    while (queue.length > 0 && processedPages < config.maxPages) {
+      // Take up to BATCH_SIZE URLs from the queue
+      const batch = queue.splice(0, BATCH_SIZE);
       
-      for (let i = 0; i < chunks.length; i += batchSize) {
-        const batch = chunks.slice(i, i + batchSize);
-        
-        const embeddingPromises = batch.map(async (chunk, batchIndex) => {
-          const globalIndex = i + batchIndex;
+      // Process batch in parallel
+      const batchResults = await Promise.allSettled(
+        batch.map(async ({ url, depth }) => {
+          const normalizedUrl = new URL(url).href;
           
-          // Skip very short chunks
-          if (chunk.trim().length < 50) {
-            console.log(`Skipping chunk ${globalIndex}: too short (${chunk.length} chars)`);
-            return { success: false, reason: 'too_short' };
+          if (visited.has(normalizedUrl) || depth > config.maxDepth) {
+            return null;
           }
-
+          
+          visited.add(normalizedUrl);
+          
           try {
-            const embedding = await createEmbedding(chunk);
+            const result = await crawlUrl(normalizedUrl);
             
-            // Always insert the chunk, even if embedding failed (for fallback search)
-            const insertData: any = {
-              event_id: eventId,
-              url_id: urlData.id,
-              content_chunk: chunk,
-              metadata: {
-                chunk_index: globalIndex,
-                chunk_length: chunk.length,
-                url: current.url,
-              },
-            };
-
-            // Only add embedding if we got a valid one
-            if (embedding && embedding.length > 0) {
-              insertData.embedding = embedding;
-            } else {
-              console.warn(`No embedding created for chunk ${globalIndex}, inserting without embedding`);
+            // Add new links to queue if we haven't reached the limit
+            if (depth < config.maxDepth) {
+              const allLinks = [
+                ...result.links.internal,
+                ...(config.includeExternal ? result.links.external : [])
+              ];
+              
+              for (const link of allLinks) {
+                if (!visited.has(link) && 
+                    queue.length + processedPages < config.maxPages &&
+                    !queue.some(item => item.url === link)) {
+                  queue.push({ url: link, depth: depth + 1 });
+                }
+              }
             }
-
-            const { data, error } = await supabase
-              .from('content_embeddings')
-              .insert(insertData)
-              .select('id')
-              .single();
-
-            if (error) {
-              console.error(`Failed to insert chunk ${globalIndex}:`, error);
-              return { success: false, error };
-            }
+            
+            return result;
+          } catch (error) {
+            console.error(`Error processing ${url}:`, error);
+            return null;
 
             return { success: true, id: data?.id };
           } catch (err) {

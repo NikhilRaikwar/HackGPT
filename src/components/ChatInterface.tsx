@@ -579,17 +579,46 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
             </ScrollArea>
 
             {/* Input Form */}
-            <div className="border-t border-border/50 p-4">
+            <div className="border-t border-border/50 p-4 relative">
+              {eventStatus === 'crawling' && (
+                <div className="absolute -top-6 left-0 right-0 px-4">
+                  <div className="bg-primary/10 text-primary text-xs font-medium px-3 py-1.5 rounded-full inline-flex items-center gap-2">
+                    <div className="h-2 w-2 rounded-full bg-blue-500 animate-pulse"></div>
+                    <span>Crawling in progress... You can ask questions, but answers may be limited until complete.</span>
+                  </div>
+                </div>
+              )}
+              {eventStatus === 'completed' && (
+                <div className="absolute -top-6 left-0 right-0 px-4">
+                  <div className="bg-green-500/10 text-green-500 text-xs font-medium px-3 py-1.5 rounded-full inline-flex items-center gap-2">
+                    <div className="h-2 w-2 rounded-full bg-green-500"></div>
+                    <span>Crawling complete! You can now ask questions about the event.</span>
+                  </div>
+                </div>
+              )}
               <form onSubmit={handleSendMessage} className="flex gap-2">
                 <Input
                   name="message"
-                  placeholder="Ask about event details, prizes, rules..."
-                  disabled={loading}
+                  placeholder={
+                    eventStatus === 'crawling' 
+                      ? 'Crawling in progress... (you can still ask questions)' 
+                      : 'Ask about event details, prizes, rules...'
+                  }
+                  disabled={loading || eventStatus === 'pending'}
                   className="flex-1"
                   autoComplete="off"
                 />
-                <Button type="submit" disabled={loading} size="sm">
-                  <Send className="h-4 w-4" />
+                <Button 
+                  type="submit" 
+                  disabled={loading || eventStatus === 'pending'}
+                  size="sm"
+                  className={eventStatus === 'pending' ? 'opacity-50 cursor-not-allowed' : ''}
+                >
+                  {loading ? (
+                    <div className="h-4 w-4 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin"></div>
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
                 </Button>
               </form>
             </div>
