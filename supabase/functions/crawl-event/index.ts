@@ -303,12 +303,6 @@ const crawlUrl = async (url: string): Promise<CrawlData> => {
       };
     }
   } catch (error) {
-    console.error(`Error crawling ${url}:`, error);
-    throw error;
-  }
-};
-
-const createEmbedding = async (text: string): Promise<number[]> => {
   try {
     // Prefer AIML embeddings if key is configured
     if (aimlApiKey) {
@@ -381,128 +375,159 @@ const crawlSite = async (
   eventId: string,
   rootUrl: string,
   config: CrawlConfig,
-) => {
+): Promise<{ totalChunks: number; totalWords: number; urlsProcessed: number }> => {
   const visited = new Set<string>();
   const queue: { url: string; depth: number }[] = [
     { url: rootUrl, depth: 0 },
   ];
-  const results: CrawlData[] = [];
-  let processedPages = 0;
-  const BATCH_SIZE = 5; // Process multiple pages in parallel
-  const EMBEDDING_BATCH_SIZE = 10; // Batch size for embedding creation
+  let totalChunks = 0;
+  let totalWords = 0;
+  let urlsProcessed = 0;
+  const EMBEDDING_BATCH_SIZE = 10;
 
   try {
-    // Update event status to 'crawling' with initial data
+    // Initialize crawl_data
     await supabase
       .from('events')
-      .update({ 
+      .update({
         status: 'crawling',
         crawl_data: {
           started_at: new Date().toISOString(),
           status: 'crawling',
           processed: 0,
-          total: 1, // Will be updated as we discover more pages
-        }
+          total: 1,
+        },
       })
       .eq('id', eventId);
 
-    // Process queue in batches for better performance
-    while (queue.length > 0 && processedPages < config.maxPages) {
-      // Take up to BATCH_SIZE URLs from the queue
-      const batch = queue.splice(0, BATCH_SIZE);
-      
-      // Process batch in parallel
-      const batchResults = await Promise.allSettled(
-        batch.map(async ({ url, depth }) => {
-          const normalizedUrl = new URL(url).href;
-          
-          if (visited.has(normalizedUrl) || depth > config.maxDepth) {
-            return null;
+    while (queue.length > 0 && urlsProcessed < config.maxPages) {
+      const current = queue.shift();
+      if (!current) break;
+
+      const normalizedUrl = new URL(current.url).href;
+      if (visited.has(normalizedUrl) || current.depth > config.maxDepth) {
+        continue;
+      }
+
+      visited.add(normalizedUrl);
+
+      try {
+        const crawlData = await crawlUrl(normalizedUrl);
+        urlsProcessed += 1;
+
+        const { data: urlRow, error: urlError } = await supabase
+          .from('event_urls')
+          .insert({
+            event_id: eventId,
+            url: normalizedUrl,
+            title: crawlData.title,
+            content: crawlData.content,
+            metadata: crawlData.metadata,
+            crawl_status: 'completed',
+          })
+          .select()
+          .single();
+
+        if (urlError) {
+          console.error('Error inserting event_url:', urlError);
+          continue;
+        }
+
+        const urlId = urlRow.id as string;
+
+        const words = crawlData.content.split(/\s+/).filter(Boolean);
+        const MAX_WORDS_PER_CHUNK = 300;
+        const chunks: string[] = [];
+        for (let i = 0; i < words.length; i += MAX_WORDS_PER_CHUNK) {
+          const chunkWords = words.slice(i, i + MAX_WORDS_PER_CHUNK);
+          if (chunkWords.length > 0) {
+            chunks.push(chunkWords.join(' '));
           }
-          
-          visited.add(normalizedUrl);
-          
-          try {
-            const result = await crawlUrl(normalizedUrl);
-            
-            // Add new links to queue if we haven't reached the limit
-            if (depth < config.maxDepth) {
-              const allLinks = [
-                ...result.links.internal,
-                ...(config.includeExternal ? result.links.external : [])
-              ];
-              
-              for (const link of allLinks) {
-                if (!visited.has(link) && 
-                    queue.length + processedPages < config.maxPages &&
-                    !queue.some(item => item.url === link)) {
-                  queue.push({ url: link, depth: depth + 1 });
-                }
+        }
+
+        let successfulInserts = 0;
+        let failedInserts = 0;
+
+        for (let i = 0; i < chunks.length; i += EMBEDDING_BATCH_SIZE) {
+          const batch = chunks.slice(i, i + EMBEDDING_BATCH_SIZE);
+
+          const embeddingPromises = batch.map(async (chunk, index) => {
+            const globalIndex = i + index;
+            try {
+              const embedding = await createEmbedding(chunk);
+              const { error: insertError } = await supabase
+                .from('content_embeddings')
+                .insert({
+                  event_id: eventId,
+                  url_id: urlId,
+                  content_chunk: chunk,
+                  embedding,
+                  metadata: {
+                    url: normalizedUrl,
+                    order: globalIndex,
+                    word_count: chunk.split(/\s+/).filter(Boolean).length,
+                  },
+                });
+
+              if (insertError) {
+                console.error('Error inserting embedding:', insertError);
+                return { success: false, error: insertError };
+              }
+
+              return { success: true };
+            } catch (err) {
+              console.error('Error creating embedding or inserting chunk:', err);
+              return { success: false, error: err };
+            }
+          });
+
+          const results = await Promise.all(embeddingPromises);
+
+          results.forEach((result) => {
+            if (result.success) {
+              successfulInserts += 1;
+            } else {
+              failedInserts += 1;
+              if ((result as any).error) {
+                console.error('Insert error:', (result as any).error);
               }
             }
-            
-            return result;
-          } catch (error) {
-            console.error(`Error processing ${url}:`, error);
-            return null;
+          });
+        }
 
-            return { success: true, id: data?.id };
-          } catch (err) {
-            console.error(`Error processing chunk ${globalIndex}:`, err);
-            return { success: false, error: err };
+        const pageWordCount = crawlData.metadata.word_count || words.length;
+        totalChunks += successfulInserts;
+        totalWords += pageWordCount;
+
+        // Enqueue new links if within depth and page limits
+        if (current.depth < config.maxDepth) {
+          const nextDepth = current.depth + 1;
+          const nextUrls: string[] = [];
+          nextUrls.push(...crawlData.links.internal);
+          if (config.includeExternal) {
+            nextUrls.push(...crawlData.links.external);
           }
-        });
-
-        const results = await Promise.all(embeddingPromises);
-        
-        // Count successes and failures
-        results.forEach(result => {
-          if (result.success) {
-            successfulInserts++;
-          } else {
-            failedInserts++;
-            if ((result as any).error) {
-              console.error('Insert error:', (result as any).error);
+          for (const nextUrl of nextUrls) {
+            if (!visited.has(nextUrl) && queue.length + urlsProcessed < config.maxPages) {
+              queue.push({ url: nextUrl, depth: nextDepth });
             }
           }
-        });
-
-        // Log batch progress
-        if (failedInserts > 0) {
-          console.warn(`Batch ${i}-${i + batch.length}: ${successfulInserts} succeeded, ${failedInserts} failed`);
         }
+      } catch (error) {
+        console.error('Error processing URL in crawlSite:', error);
+        continue;
       }
-
-      console.log(`Processed ${chunks.length} chunks: ${successfulInserts} inserted successfully, ${failedInserts} failed`);
-
-      totalChunks += chunks.length;
-      totalWords += crawlData.metadata.word_count;
-      urlsProcessed += 1;
-
-      if (current.depth < config.maxDepth) {
-        const nextDepth = current.depth + 1;
-        const nextUrls: string[] = [];
-        nextUrls.push(...crawlData.links.internal);
-        if (config.includeExternal) {
-          nextUrls.push(...crawlData.links.external);
-        }
-        for (const nextUrl of nextUrls) {
-          if (!visited.has(nextUrl)) {
-            queue.push({ url: nextUrl, depth: nextDepth });
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Error processing URL in crawlSite:', error);
-      continue;
     }
-  }
 
-  return {
-    totalChunks,
-    totalWords,
-    urlsProcessed,
-  };
+    return {
+      totalChunks,
+      totalWords,
+      urlsProcessed,
+    };
+  } catch (error) {
+    console.error('Error in crawlSite:', error);
+    throw error;
+  }
 };
 
 serve(async (req) => {
@@ -551,7 +576,7 @@ serve(async (req) => {
       );
     }
 
-    // Update event status to crawling and persist effective model id
+    // Persist effective model id
     await supabase
       .from('events')
       .update({ status: 'crawling', model_id: effectiveModelId })
@@ -578,7 +603,7 @@ serve(async (req) => {
       }
 
       const finalStatus = embeddingCount && embeddingCount > 0 ? 'completed' : 'failed';
-      
+
       if (finalStatus === 'failed') {
         console.error(`Crawl failed: No embeddings created for event ${eventId}. Total chunks processed: ${result.totalChunks}`);
       } else {
