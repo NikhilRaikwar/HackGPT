@@ -324,14 +324,14 @@ export const Dashboard = () => {
                                     <SelectValue placeholder="Select AI model" />
                                   </SelectTrigger>
                                   <SelectContent className="max-h-[400px]">
-                                    {Object.values(AIML_MODEL_CONFIG).map((model) => (
-                                      <SelectItem key={model.shortId} value={model.shortId} className="py-3">
+                                    {Object.entries(AIML_MODEL_CONFIG).map(([key, model]) => (
+                                      <SelectItem key={key} value={key} className="py-3">
                                         <div className="flex flex-col gap-1">
                                           <div className="flex items-center gap-2">
-                                            <span className="font-medium">{model.label}</span>
+                                            <span className="font-medium">{model.name}</span>
                                             <span className="text-xs text-muted-foreground">({model.provider})</span>
                                           </div>
-                                          <span className="text-xs text-muted-foreground">{model.bestFor}</span>
+                                          <span className="text-xs text-muted-foreground">{model.description}</span>
                                         </div>
                                       </SelectItem>
                                     ))}

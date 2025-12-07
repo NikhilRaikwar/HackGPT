@@ -396,7 +396,7 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
               {chatModelId && AIML_MODEL_CONFIG[chatModelId] && (
                 <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
                   <Sparkles className="h-3 w-3" />
-                  Using {AIML_MODEL_CONFIG[chatModelId].label}
+                  Using {AIML_MODEL_CONFIG[chatModelId].name}
                 </p>
               )}
             </div>
@@ -424,7 +424,7 @@ export const ChatInterface = ({ eventId, onBack, onEventSelect, isEmbedded = fal
                     onChange={(newModelId) => {
                       setChatModelId(newModelId);
                       setShowModelSelector(false);
-                      toast.success(`Switched to ${AIML_MODEL_CONFIG[newModelId].label}`);
+                      toast.success(`Switched to ${AIML_MODEL_CONFIG[newModelId].name}`);
                     }}
                   />
                 </DialogContent>
