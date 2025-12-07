@@ -133,11 +133,23 @@ export const AIML_MODEL_CONFIG: Record<string, ModelInfo> = {
     cost: 'medium',
     category: 'reasoning',
   },
+  'sonar': {
+    id: "perplexity/sonar",
+    shortId: "sonar",
+    label: "Perplexity Sonar",
+    provider: "Perplexity",
+    contextTokens: 128_000,
+    tier: 2,
+    bestFor: "Web search, crawling, fact-checking, topic summaries, real-time information",
+    speed: 'fast',
+    cost: 'low',
+    category: 'chat',
+  },
 };
 
 export const MODEL_CATEGORIES = {
   reasoning: ['deepseek-r1', 'claude-opus', 'mistral-large'],
-  chat: ['gpt-4o', 'claude-sonnet'],
+  chat: ['gpt-4o', 'claude-sonnet', 'sonar'],
   fast: ['gpt-4o-mini', 'claude-haiku', 'llama-70b'],
   'long-form': ['claude-sonnet', 'gemini-pro'],
   'open-source': ['llama-405b', 'llama-70b'],

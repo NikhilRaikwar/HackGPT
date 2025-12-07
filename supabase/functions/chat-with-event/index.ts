@@ -193,6 +193,8 @@ const MODEL_MAP: Record<string, string> = {
   // Other models
   'gemini-pro': 'google/gemini-pro-1.5',
   'mistral-large': 'mistralai/mistral-large-2407',
+  // Perplexity models
+  'sonar': 'perplexity/sonar',
 };
 
 const resolveChatModel = (requestedModelId?: string): string => {
@@ -234,21 +236,39 @@ Be conversational but informative. Focus on providing practical and actionable i
 
   try {
     const model = resolveChatModel(modelId);
+
+    const baseBody: Record<string, unknown> = {
+      model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userMessage },
+      ],
+      // Slightly lower temperature for clearer, more factual answers
+      temperature: 0.5,
+      max_tokens: 900,
+    };
+
+    // If we're using Perplexity Sonar, enable web search options for crawling/answering
+    if (model === 'perplexity/sonar') {
+      Object.assign(baseBody, {
+        search_mode: 'web',
+        web_search_options: {
+          search_context_size: 'medium',
+        },
+        // Prefer reasonably recent information while still allowing older docs
+        search_recency_filter: 'year',
+        return_images: false,
+        return_related_questions: false,
+      });
+    }
+
     const response = await fetch('https://api.aimlapi.com/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${aimlApiKey}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userMessage }
-        ],
-        temperature: 0.7,
-        max_tokens: 1000,
-      }),
+      body: JSON.stringify(baseBody),
     });
 
     if (!response.ok) {
