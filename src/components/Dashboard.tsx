@@ -126,41 +126,45 @@ export const Dashboard = () => {
 
       if (error) throw error;
       
-      // Update loading message
-      toast.loading('Crawling the event website... This may take a few minutes.', { id: loadingToast });
-      
-      // Start crawling process with default config (deeper crawl)
-      const { error: crawlError } = await supabase.functions.invoke('crawl-event', {
-        body: {
-          eventId: data.id,
-          url: eventUrl,
-          maxDepth: 2,
-          maxPages: 20,
-          includeExternal: true,
-          modelId,
-        }
-      });
+      // Immediately open the chat view for the new event so the user can start talking
+      setSelectedEventId(data.id);
+      setSelectedEventName(data.name);
 
-      if (crawlError) {
-        console.error('Crawl error:', crawlError);
-        toast.error('Failed to start crawling process', { id: loadingToast });
-        return;
-      }
+      // Update loading message while crawling runs in the background
+      toast.loading('Crawling the event website with your selected AI model...', { id: loadingToast });
+
+      // Start crawling process with default config (deeper crawl) using the selected model
+      supabase.functions
+        .invoke('crawl-event', {
+          body: {
+            eventId: data.id,
+            url: eventUrl,
+            maxDepth: 2,
+            maxPages: 20,
+            includeExternal: true,
+            modelId,
+          }
+        })
+        .then(({ error: crawlError }) => {
+          if (crawlError) {
+            console.error('Crawl error:', crawlError);
+            toast.error('Failed to start crawling process', { id: loadingToast });
+          } else {
+            toast.success('Crawling started! You can chat while we index the event.', {
+              id: loadingToast,
+              duration: 5000,
+            });
+          }
+        })
+        .catch((err) => {
+          console.error('Error invoking crawl-event:', err);
+          toast.error('Failed to start crawling process', { id: loadingToast });
+        });
 
       // Clear the form
       setEventName("");
       setEventUrl("");
       setModelId(DEFAULT_MODEL);
-
-      // Automatically open the chat for the new event
-      setSelectedEventId(data.id);
-      setSelectedEventName(data.name);
-      
-      // Show success message and update loading state
-      toast.success('Event assistant is ready! Start asking questions.', { 
-        id: loadingToast,
-        duration: 5000 
-      });
       
       // Refresh events list
       await loadEvents();
