@@ -36,22 +36,153 @@ interface CrawlData {
     word_count: number;
     internal_links: number;
     external_links: number;
+    hackathon_info?: any;
   };
 }
 
-// Simple text extraction function
+// Enhanced text extraction for hackathon content
 const extractTextFromHtml = (html: string): string => {
   // Remove script and style elements
   let text = html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
   text = text.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+  text = text.replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, '');
+  text = text.replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '');
   
-  // Remove HTML tags
+  // Convert common hackathon elements to readable text
+  text = text.replace(/<h[1-6][^>]*>([^<]+)<\/h[1-6]>/gi, '\n\n$1\n');
+  text = text.replace(/<strong[^>]*>([^<]+)<\/strong>/gi, '**$1**');
+  text = text.replace(/<b[^>]*>([^<]+)<\/b>/gi, '**$1**');
+  text = text.replace(/<em[^>]*>([^<]+)<\/em>/gi, '*$1*');
+  text = text.replace(/<i[^>]*>([^<]+)<\/i>/gi, '*$1*');
+  
+  // Handle lists properly
+  text = text.replace(/<ul[^>]*>/gi, '\n');
+  text = text.replace(/<ol[^>]*>/gi, '\n');
+  text = text.replace(/<\/ul>/gi, '\n');
+  text = text.replace(/<\/ol>/gi, '\n');
+  text = text.replace(/<li[^>]*>([^<]+)<\/li>/gi, '• $1\n');
+  
+  // Handle paragraphs and line breaks
+  text = text.replace(/<p[^>]*>/gi, '\n');
+  text = text.replace(/<\/p>/gi, '\n\n');
+  text = text.replace(/<br[^>]*>/gi, '\n');
+  
+  // Remove remaining HTML tags
   text = text.replace(/<[^>]*>/g, ' ');
   
-  // Clean up whitespace
+  // Clean up whitespace and formatting
+  text = text.replace(/\n\s*\n\s*\n/g, '\n\n'); // Remove excessive newlines
   text = text.replace(/\s+/g, ' ').trim();
   
   return text;
+};
+
+// Extract structured hackathon information
+const extractHackathonInfo = (html: string, text: string): any => {
+  const info: any = {};
+  
+  // Extract title with priority
+  const titleSelectors = [
+    /<h1[^>]*class=["'][^"']*(?:title|event-title|hackathon)[^"']*["'][^>]*>([^<]+)<\/h1>/i,
+    /<title[^>]*>([^<]+)<\/title>/i,
+    /<h1[^>]*>([^<]+)<\/h1>/i,
+    /<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["']/i
+  ];
+  
+  for (const selector of titleSelectors) {
+    const match = html.match(selector);
+    if (match && match[1]) {
+      info.title = match[1].trim();
+      break;
+    }
+  }
+  
+  // Extract dates
+  const datePatterns = [
+    /(?:date|when|starts?|ends?|begins?)[\s:]*([\d]{1,2}[\/-][\d]{1,2}[\/-][\d]{2,4}|[\d]{4}[\/-][\d]{1,2}[\/-][\d]{1,2})/gi,
+    /([\d]{1,2}[\/-][\d]{1,2}[\/-][\d]{2,4}|[\d]{4}[\/-][\d]{1,2}[\/-][\d]{1,2})\s*(?:to|until|till|-|–)\s*([\d]{1,2}[\/-][\d]{1,2}[\/-][\d]{2,4}|[\d]{4}[\/-][\d]{1,2}[\/-][\d]{1,2})/gi,
+    /(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december)[\s\d]{1,30}/gi
+  ];
+  
+  const dates = [];
+  for (const pattern of datePatterns) {
+    const matches = text.match(pattern);
+    if (matches) {
+      dates.push(...matches);
+    }
+  }
+  if (dates.length > 0) {
+    info.dates = [...new Set(dates)]; // Remove duplicates
+  }
+  
+  // Extract prizes
+  const prizePatterns = [
+    /(?:prize|prize pool|award|reward|winning)[\s:]*[$]?[\d,]+(?:\s*(?:usd|dollars?|cash))?/gi,
+    /\$[\d,]+(?:\s*(?:in prizes?|awards?|cash))?/gi,
+    /(?:first|second|third|1st|2nd|3rd)\s+place[\s:]*[$]?[\d,]+/gi
+  ];
+  
+  const prizes = [];
+  for (const pattern of prizePatterns) {
+    const matches = text.match(pattern);
+    if (matches) {
+      prizes.push(...matches);
+    }
+  }
+  if (prizes.length > 0) {
+    info.prizes = [...new Set(prizes)];
+  }
+  
+  // Extract registration/submission info
+  const registrationPatterns = [
+    /(?:register|registration|sign.?up)[\s:]*([\d]{1,2}[\/-][\d]{1,2}[\/-][\d]{2,4}|[\d]{4}[\/-][\d]{1,2}[\/-][\d]{1,2}|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[\s\d]{1,30}/gi,
+    /(?:deadline|due|submit)[\s:]*([\d]{1,2}[\/-][\d]{1,2}[\/-][\d]{2,4}|[\d]{4}[\/-][\d]{1,2}[\/-][\d]{1,2}|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[\s\d]{1,30}/gi
+  ];
+  
+  const deadlines = [];
+  for (const pattern of registrationPatterns) {
+    const matches = text.match(pattern);
+    if (matches) {
+      deadlines.push(...matches);
+    }
+  }
+  if (deadlines.length > 0) {
+    info.deadlines = [...new Set(deadlines)];
+  }
+  
+  // Extract location (virtual/physical)
+  const locationPatterns = [
+    /(?:location|venue|where)[\s:]*([^\n\r]{10,100})/gi,
+    /(?:virtual|online|remote)/gi,
+    /(?:\d+\s+[A-Za-z\s]+,\s*[A-Za-z\s]+)/gi
+  ];
+  
+  for (const pattern of locationPatterns) {
+    const match = text.match(pattern);
+    if (match) {
+      info.location = match[0].trim();
+      break;
+    }
+  }
+  
+  // Extract tech stack/technologies
+  const techPatterns = [
+    /(?:tech|technology|stack|tools)[\s:]*([^\n\r]{10,200})/gi,
+    /(?:react|vue|angular|node|python|javascript|typescript|java|swift|kotlin|flutter|docker|kubernetes|aws|azure|gcp|firebase|mongodb|postgresql|mysql|graphql|rest api)/gi
+  ];
+  
+  const technologies = [];
+  for (const pattern of techPatterns) {
+    const matches = text.match(pattern);
+    if (matches) {
+      technologies.push(...matches);
+    }
+  }
+  if (technologies.length > 0) {
+    info.technologies = [...new Set(technologies)];
+  }
+  
+  return info;
 };
 
 const extractLinks = (html: string, baseUrl: string): { internal: string[]; external: string[] } => {
@@ -86,7 +217,13 @@ const crawlUrl = async (url: string): Promise<CrawlData> => {
     
     const response = await fetch(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; EventInsightBot/1.0)',
+        'User-Agent': 'Mozilla/5.0 (compatible; HackathonBot/1.0; +https://hackgpt.ai)',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Accept-Encoding': 'gzip, deflate',
+        'DNT': '1',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
       },
     });
 
@@ -96,11 +233,12 @@ const crawlUrl = async (url: string): Promise<CrawlData> => {
 
     const html = await response.text();
     const content = extractTextFromHtml(html);
+    const hackathonInfo = extractHackathonInfo(html, content);
     const links = extractLinks(html, url);
     
-    // Extract title from HTML
+    // Extract title with fallback to hackathon info
     const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
-    const title = titleMatch ? titleMatch[1].trim() : new URL(url).hostname;
+    const title = hackathonInfo.title || (titleMatch ? titleMatch[1].trim() : new URL(url).hostname);
 
     return {
       title,
@@ -113,6 +251,7 @@ const crawlUrl = async (url: string): Promise<CrawlData> => {
         word_count: content.split(/\s+/).length,
         internal_links: links.internal.length,
         external_links: links.external.length,
+        hackathon_info: hackathonInfo,
       }
     };
   } catch (error) {
@@ -176,25 +315,46 @@ const createEmbedding = async (text: string): Promise<number[]> => {
   }
 };
 
-const chunkText = (text: string, maxChunkSize = 1000): string[] => {
-  const sentences = text.split(/[.!?]+/);
+const chunkText = (text: string, maxChunkSize = 1500): string[] => {
+  // First, try to preserve semantic structure
+  const sections = text.split(/\n\n+/); // Split by double newlines (paragraphs)
   const chunks: string[] = [];
-  let currentChunk = '';
-
-  for (const sentence of sentences) {
-    if ((currentChunk + sentence).length > maxChunkSize && currentChunk) {
+  
+  for (const section of sections) {
+    const trimmedSection = section.trim();
+    if (trimmedSection.length < 50) continue; // Skip very short sections
+    
+    // If section is small enough, keep it whole
+    if (trimmedSection.length <= maxChunkSize) {
+      chunks.push(trimmedSection);
+      continue;
+    }
+    
+    // For larger sections, try to split by sentences while preserving context
+    const sentences = trimmedSection.split(/[.!?]+/).filter(s => s.trim().length > 0);
+    let currentChunk = '';
+    
+    for (const sentence of sentences) {
+      const testChunk = currentChunk + (currentChunk ? '. ' : '') + sentence;
+      
+      if (testChunk.length > maxChunkSize && currentChunk) {
+        chunks.push(currentChunk.trim());
+        currentChunk = sentence;
+      } else {
+        currentChunk = testChunk;
+      }
+    }
+    
+    if (currentChunk.trim()) {
       chunks.push(currentChunk.trim());
-      currentChunk = sentence;
-    } else {
-      currentChunk += (currentChunk ? '. ' : '') + sentence;
     }
   }
-
-  if (currentChunk.trim()) {
-    chunks.push(currentChunk.trim());
-  }
-
-  return chunks.filter(chunk => chunk.length > 50); // Filter out very short chunks
+  
+  // Filter chunks and ensure minimum quality
+  return chunks.filter(chunk => {
+    const trimmed = chunk.trim();
+    return trimmed.length >= 50 && trimmed.length <= 2000; // Reasonable chunk sizes
+  });
 };
 
 interface CrawlConfig {
@@ -232,7 +392,10 @@ const crawlSite = async (
           url: current.url,
           title: crawlData.title,
           content: crawlData.content,
-          metadata: crawlData.metadata,
+          metadata: {
+            ...crawlData.metadata,
+            hackathon_info: crawlData.metadata.hackathon_info || {}
+          },
           crawl_status: 'completed',
         })
         .select()

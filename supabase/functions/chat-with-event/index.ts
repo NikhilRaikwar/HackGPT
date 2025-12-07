@@ -1,5 +1,8 @@
+// @ts-ignore - Deno-specific import
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
+// @ts-ignore - Deno-specific import
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+// @ts-ignore - Deno-specific import
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.50.3';
 
 const corsHeaders = {
@@ -7,8 +10,11 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// @ts-ignore - Deno environment variable
 const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+// @ts-ignore - Deno environment variable
 const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+// @ts-ignore - Deno environment variable
 const aimlApiKey = Deno.env.get('AIMLAPI_KEY');
 
 const supabase = createClient(supabaseUrl, supabaseKey);
@@ -96,7 +102,7 @@ const findRelevantContent = async (eventId: string, query: string, limit = 5): P
         console.error('Fallback query error:', fallbackError);
         return [];
       }
-      return data?.map(item => item.content_chunk) || [];
+      return data?.map((item: { content_chunk: string }) => item.content_chunk) || [];
     }
     
     // Try vector similarity search first (if embeddings exist)
@@ -146,7 +152,7 @@ const findRelevantContent = async (eventId: string, query: string, limit = 5): P
       return [];
     }
     
-    const fallbackChunks = fallbackData?.map(item => item.content_chunk) || [];
+    const fallbackChunks = fallbackData?.map((item: { content_chunk: string }) => item.content_chunk) || [];
     
     if (fallbackChunks.length === 0) {
       console.log(`No content chunks found at all for event ${eventId}`);
@@ -169,7 +175,7 @@ const findRelevantContent = async (eventId: string, query: string, limit = 5): P
         console.error('Final fallback error:', fallbackError);
         return [];
       }
-      return data?.map(item => item.content_chunk) || [];
+      return data?.map((item: { content_chunk: string }) => item.content_chunk) || [];
     } catch (finalError) {
       console.error('Final fallback failed:', finalError);
       return [];
@@ -178,23 +184,8 @@ const findRelevantContent = async (eventId: string, query: string, limit = 5): P
 };
 
 const MODEL_MAP: Record<string, string> = {
-  // Reasoning models
-  'deepseek-r1': 'deepseek/deepseek-r1',
-  // Chat models
+  'grok-4-fast-reasoning': 'x-ai/grok-4-fast-reasoning',
   'gpt-4o': 'gpt-4o',
-  'gpt-4o-mini': 'gpt-4o-mini',
-  // Claude models
-  'claude-sonnet': 'claude-3.7-sonnet-20250219',
-  'claude-opus': 'claude-3-opus-20240229',
-  'claude-haiku': 'claude-3-haiku-20240307',
-  // Llama models
-  'llama-405b': 'meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo',
-  'llama-70b': 'meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo',
-  // Other models
-  'gemini-pro': 'google/gemini-pro-1.5',
-  'mistral-large': 'mistralai/mistral-large-2407',
-  // Perplexity models
-  'sonar': 'perplexity/sonar',
 };
 
 const resolveChatModel = (requestedModelId?: string): string => {
@@ -214,9 +205,66 @@ const resolveChatModel = (requestedModelId?: string): string => {
   }
 
   // Fallback to default
-  console.warn(`Unknown model id: ${requestedModelId}, using default gpt-4o`);
-  return 'gpt-4o';
+  console.warn(`Unknown model id: ${requestedModelId}, using default grok-4-fast-reasoning`);
+  return 'x-ai/grok-4-fast-reasoning';
 };
+
+// Function calling tools
+const TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "get_event_info",
+      description: "Get detailed information about the event including rules, timeline, prizes, and participation details",
+      parameters: {
+        type: "object",
+        properties: {
+          info_type: {
+            type: "string",
+            enum: ["rules", "timeline", "prizes", "participation", "judging", "all"],
+            description: "Type of information to retrieve"
+          }
+        },
+        required: []
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "search_content",
+      description: "Search for specific content within the event information",
+      parameters: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            description: "Search query to find specific information"
+          }
+        },
+        required: ["query"]
+      }
+    }
+  },
+  {
+    type: "function", 
+    function: {
+      name: "get_participation_guide",
+      description: "Get a step-by-step guide on how to participate in this hackathon",
+      parameters: {
+        type: "object",
+        properties: {
+          focus_area: {
+            type: "string",
+            enum: ["registration", "submission", "teams", "technical", "all"],
+            description: "Specific area of participation to focus on"
+          }
+        },
+        required: []
+      }
+    }
+  }
+];
 
 const generateResponse = async (context: string[], userMessage: string, modelId?: string): Promise<string> => {
   if (!aimlApiKey) {
@@ -246,21 +294,10 @@ Be conversational but informative. Focus on providing practical and actionable i
       // Slightly lower temperature for clearer, more factual answers
       temperature: 0.5,
       max_tokens: 900,
+      // Enable function calling
+      tools: TOOLS,
+      tool_choice: "auto"
     };
-
-    // If we're using Perplexity Sonar, enable web search options for crawling/answering
-    if (model === 'perplexity/sonar') {
-      Object.assign(baseBody, {
-        search_mode: 'web',
-        web_search_options: {
-          search_context_size: 'medium',
-        },
-        // Prefer reasonably recent information while still allowing older docs
-        search_recency_filter: 'year',
-        return_images: false,
-        return_related_questions: false,
-      });
-    }
 
     const response = await fetch('https://api.aimlapi.com/v1/chat/completions', {
       method: 'POST',
@@ -276,14 +313,280 @@ Be conversational but informative. Focus on providing practical and actionable i
     }
 
     const data = await response.json();
-    return data.choices[0].message.content;
+    const choice = data.choices[0];
+    
+    // Handle function calling
+    if (choice.message.tool_calls) {
+      return await handleToolCalls(choice.message.tool_calls, context);
+    }
+    
+    return choice.message.content;
   } catch (error) {
-    console.error('Error generating response:', error);
-    throw error;
+    console.error('Error generating tool response:', error);
+    return `I found some information but encountered an error while processing it: ${(error as Error).message}`;
   }
 };
 
-serve(async (req) => {
+const handleToolCalls = async (toolCalls: any[], context: string[]): Promise<string> => {
+  const toolResults = [];
+  
+  for (const toolCall of toolCalls) {
+    const { name, arguments: args } = toolCall.function;
+    
+    switch (name) {
+      case 'get_event_info':
+        const infoType = args?.info_type || 'all';
+        const info = await getEventInfo(context, infoType);
+        toolResults.push({
+          tool_call_id: toolCall.id,
+          output: info
+        });
+        break;
+        
+      case 'search_content':
+        const query = args?.query;
+        if (!query) {
+          toolResults.push({
+            tool_call_id: toolCall.id,
+            output: 'Error: Search query is required'
+          });
+        } else {
+          const searchResult = await searchEventContent(context, query);
+          toolResults.push({
+            tool_call_id: toolCall.id,
+            output: searchResult
+          });
+        }
+        break;
+        
+      case 'get_participation_guide':
+        const focusArea = args?.focus_area || 'all';
+        const guide = await getParticipationGuide(context, focusArea);
+        toolResults.push({
+          tool_call_id: toolCall.id,
+          output: guide
+        });
+        break;
+        
+      default:
+        toolResults.push({
+          tool_call_id: toolCall.id,
+          output: `Unknown tool: ${name}`
+        });
+    }
+  }
+  
+  // Generate final response based on tool results
+  const resultsText = toolResults.map(r => r.output).join('\n\n');
+  
+  if (!aimlApiKey) {
+    throw new Error('AIML API key not configured');
+  }
+  
+  try {
+    const response = await fetch('https://api.aimlapi.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${aimlApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'x-ai/grok-4-fast-reasoning',
+        messages: [
+          { 
+            role: 'system', 
+            content: 'You are an AI assistant. Based on the tool results provided, give a comprehensive and helpful answer to the user.' 
+          },
+          { 
+            role: 'user', 
+            content: `Based on these tool results, please provide a complete answer:\n\n${resultsText}` 
+          }
+        ],
+        temperature: 0.5,
+        max_tokens: 900,
+      }),
+    });
+    
+    if (!response.ok) {
+      throw new Error(`AIML API error: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    return data.choices[0].message.content;
+  } catch (error) {
+    console.error('Error generating tool response:', error);
+    return `I found some information but encountered an error while processing it: ${(error as Error).message}`;
+  }
+};
+
+const getEventInfo = async (context: string[], infoType: string): Promise<string> => {
+  const contextText = context.join('\n\n');
+  
+  switch (infoType) {
+    case 'rules':
+      return extractRules(contextText);
+    case 'timeline':
+      return extractTimeline(contextText);
+    case 'prizes':
+      return extractPrizes(contextText);
+    case 'participation':
+      return extractParticipation(contextText);
+    case 'judging':
+      return extractJudging(contextText);
+    case 'all':
+    default:
+      return `Event Information:\n\n${contextText}`;
+  }
+};
+
+const searchEventContent = async (context: string[], query: string): Promise<string> => {
+  const contextText = context.join('\n\n');
+  const queryLower = query.toLowerCase();
+  
+  // Simple keyword-based search in context
+  const lines = contextText.split('\n');
+  const matchingLines = lines.filter(line => 
+    line.toLowerCase().includes(queryLower)
+  );
+  
+  if (matchingLines.length === 0) {
+    return `No specific information found for "${query}". Here's the general event information:\n\n${contextText}`;
+  }
+  
+  return `Search results for "${query}":\n\n${matchingLines.join('\n')}`;
+};
+
+const getParticipationGuide = async (context: string[], focusArea: string): Promise<string> => {
+  const contextText = context.join('\n\n');
+  
+  switch (focusArea) {
+    case 'registration':
+      return extractRegistrationGuide(contextText);
+    case 'submission':
+      return extractSubmissionGuide(contextText);
+    case 'teams':
+      return extractTeamGuide(contextText);
+    case 'technical':
+      return extractTechnicalGuide(contextText);
+    case 'all':
+    default:
+      return `Complete Participation Guide:\n\n${contextText}`;
+  }
+};
+
+// Helper functions for extracting specific information
+const extractRules = (text: string): string => {
+  // Look for rules-related keywords
+  const rulesKeywords = ['rule', 'guideline', 'requirement', 'criteria', 'must', 'should'];
+  const lines = text.split('\n');
+  const rulesLines = lines.filter(line => 
+    rulesKeywords.some(keyword => line.toLowerCase().includes(keyword))
+  );
+  
+  return rulesLines.length > 0 
+    ? `Event Rules:\n\n${rulesLines.join('\n')}`
+    : `No specific rules found in the event information.`;
+};
+
+const extractTimeline = (text: string): string => {
+  // Look for date/time patterns
+  const datePattern = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december|\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{2}-\d{2})\b/i;
+  const lines = text.split('\n');
+  const timelineLines = lines.filter(line => datePattern.test(line));
+  
+  return timelineLines.length > 0
+    ? `Event Timeline:\n\n${timelineLines.join('\n')}`
+    : `No specific timeline found in the event information.`;
+};
+
+const extractPrizes = (text: string): string => {
+  // Look for prize-related keywords
+  const prizeKeywords = ['prize', 'award', 'win', 'reward', 'cash', 'money', '$'];
+  const lines = text.split('\n');
+  const prizeLines = lines.filter(line => 
+    prizeKeywords.some(keyword => line.toLowerCase().includes(keyword))
+  );
+  
+  return prizeLines.length > 0
+    ? `Prizes and Awards:\n\n${prizeLines.join('\n')}`
+    : `No specific prize information found in the event information.`;
+};
+
+const extractParticipation = (text: string): string => {
+  // Look for participation-related keywords
+  const participationKeywords = ['participate', 'join', 'enter', 'register', 'sign up', 'who can'];
+  const lines = text.split('\n');
+  const participationLines = lines.filter(line => 
+    participationKeywords.some(keyword => line.toLowerCase().includes(keyword))
+  );
+  
+  return participationLines.length > 0
+    ? `Participation Information:\n\n${participationLines.join('\n')}`
+    : `No specific participation information found in the event information.`;
+};
+
+const extractJudging = (text: string): string => {
+  // Look for judging-related keywords
+  const judgingKeywords = ['judge', 'judging', 'criteria', 'evaluation', 'score', 'assessment'];
+  const lines = text.split('\n');
+  const judgingLines = lines.filter(line => 
+    judgingKeywords.some(keyword => line.toLowerCase().includes(keyword))
+  );
+  
+  return judgingLines.length > 0
+    ? `Judging Information:\n\n${judgingLines.join('\n')}`
+    : `No specific judging information found in the event information.`;
+};
+
+const extractRegistrationGuide = (text: string): string => {
+  const registrationKeywords = ['register', 'registration', 'sign up', 'enroll'];
+  const lines = text.split('\n');
+  const registrationLines = lines.filter(line => 
+    registrationKeywords.some(keyword => line.toLowerCase().includes(keyword))
+  );
+  
+  return registrationLines.length > 0
+    ? `Registration Guide:\n\n${registrationLines.join('\n')}`
+    : `No specific registration information found. Please check the event website for registration details.`;
+};
+
+const extractSubmissionGuide = (text: string): string => {
+  const submissionKeywords = ['submit', 'submission', 'deadline', 'deliverable'];
+  const lines = text.split('\n');
+  const submissionLines = lines.filter(line => 
+    submissionKeywords.some(keyword => line.toLowerCase().includes(keyword))
+  );
+  
+  return submissionLines.length > 0
+    ? `Submission Guide:\n\n${submissionLines.join('\n')}`
+    : `No specific submission information found. Please check the event website for submission guidelines.`;
+};
+
+const extractTeamGuide = (text: string): string => {
+  const teamKeywords = ['team', 'group', 'collaborate', 'member'];
+  const lines = text.split('\n');
+  const teamLines = lines.filter(line => 
+    teamKeywords.some(keyword => line.toLowerCase().includes(keyword))
+  );
+  
+  return teamLines.length > 0
+    ? `Team Information:\n\n${teamLines.join('\n')}`
+    : `No specific team information found. Please check the event website for team guidelines.`;
+};
+
+const extractTechnicalGuide = (text: string): string => {
+  const techKeywords = ['technology', 'tech stack', 'api', 'framework', 'library', 'tool'];
+  const lines = text.split('\n');
+  const techLines = lines.filter(line => 
+    techKeywords.some(keyword => line.toLowerCase().includes(keyword))
+  );
+  
+  return techLines.length > 0
+    ? `Technical Information:\n\n${techLines.join('\n')}`
+    : `No specific technical information found. Please check the event website for technical requirements.`;
+};
+
+serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
