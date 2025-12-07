@@ -109,6 +109,9 @@ export const Dashboard = () => {
       // Basic URL validation
       new URL(eventUrl);
 
+      // Show loading state
+      const loadingToast = toast.loading('Creating your event assistant...');
+
       const { data, error } = await supabase
         .from('events')
         .insert({
@@ -122,6 +125,9 @@ export const Dashboard = () => {
         .single();
 
       if (error) throw error;
+      
+      // Update loading message
+      toast.loading('Crawling the event website... This may take a few minutes.', { id: loadingToast });
       
       // Start crawling process with default config (deeper crawl)
       const { error: crawlError } = await supabase.functions.invoke('crawl-event', {
@@ -137,19 +143,27 @@ export const Dashboard = () => {
 
       if (crawlError) {
         console.error('Crawl error:', crawlError);
-        toast.error('Failed to start crawling process');
-      } else {
-        toast.success('URL submitted! Crawling started...');
-        loadEvents();
-        // Clear the form
-        setEventName("");
-        setEventUrl("");
-        setModelId(DEFAULT_MODEL);
-
-        // Automatically open the chat for the new event
-        setSelectedEventId(data.id);
-        setSelectedEventName(data.name);
+        toast.error('Failed to start crawling process', { id: loadingToast });
+        return;
       }
+
+      // Clear the form
+      setEventName("");
+      setEventUrl("");
+      setModelId(DEFAULT_MODEL);
+
+      // Automatically open the chat for the new event
+      setSelectedEventId(data.id);
+      setSelectedEventName(data.name);
+      
+      // Show success message and update loading state
+      toast.success('Event assistant is ready! Start asking questions.', { 
+        id: loadingToast,
+        duration: 5000 
+      });
+      
+      // Refresh events list
+      await loadEvents();
     } catch (error) {
       if (error instanceof TypeError) {
         toast.error('Please enter a valid URL');
